@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+:root {
+  --webex-blue: #00BCF2;
+  --webex-dark: #1B2A3A;
+  --webex-teal: #00827F;
+  --webex-green: #4CAF50;
+  --webex-red: #F44336;
+  --webex-orange: #FF6B35;
+  --webex-purple: #7B2D8B;
+  --webex-yellow: #FFC107;
+  --canvas-bg: #F0F2F5;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'CiscoSans', Roboto, sans-serif;
+  background: var(--canvas-bg);
+  overflow: hidden;
+}
+
+/* React Flow overrides */
+.react-flow__node {
+  border-radius: 8px;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2;
+}
+
+.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid white;
+  background: #64748b;
+}
+
+.react-flow__handle-connecting {
+  background: #00BCF2;
+}
+
+.react-flow__handle-valid {
+  background: #4CAF50;
+}
+
+.react-flow__controls {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+}
+
+.react-flow__controls button {
+  border-bottom: 1px solid #E2E8F0;
+  background: white;
+}
+
+.react-flow__controls button:hover {
+  background: #F8FAFC;
+}
+
+.react-flow__minimap {
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+  overflow: hidden;
+}
+
+/* Node drag ghost */
+.dragging-node {
+  opacity: 0.6;
+  transform: scale(0.95);
+  transition: opacity 0.1s, transform 0.1s;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
