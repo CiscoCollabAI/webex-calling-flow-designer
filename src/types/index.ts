@@ -168,6 +168,12 @@ export interface NodeData extends Record<string, unknown> {
   priorityEscalationThreshold?: number;
   digitalHandoffEnabled?: boolean;
   callTimeoutHandlingEnabled?: boolean;
+  // Set by the Webex importer only — confirmed absent from the entire public Cloud
+  // Calling OpenAPI spec (read and write schemas both checked), not just callPolicies.
+  // Distinguishes "imported, unknowable" from "manually authored" so the UI doesn't
+  // assert false certainty about an imported queue's actual state.
+  priorityEscalationSourceUnknown?: boolean;
+  callTimeoutHandlingSourceUnknown?: boolean;
   // Bounced Calls — confirmed via callPolicies.callBounce
   callBounceEnabled?: boolean;
   callBounceMaxRings?: number;

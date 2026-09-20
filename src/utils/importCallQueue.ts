@@ -224,7 +224,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
           kind: 'playMessage',
           label: 'Forced Forward Announcement',
           messageType: forcedForward!.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-          audioFile: forcedForward!.audioFiles?.[0]?.name ?? '',
+          audioFile: forcedForward!.audioFiles?.[0]?.fileName ?? '',
         } as NodeData,
       });
       edges.push(mkEdge(`e-${startId}-ff-ann`, startId, ffAnnId, { label: 'Forced Forward', color: '#dc2626' }));
@@ -365,7 +365,12 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       // as a real field on callPolicies at all (see Small Leftovers flag).
       estimatedWaitEnabled: qs?.waitMessage?.enabled ?? true,
       agentJoinEnabled: detail.allowAgentJoinEnabled ?? true,
+      // Confirmed absent from the entire public OpenAPI spec (read + write schemas
+      // both checked, not just callPolicies) — see FLAGGED_ITEMS.md #2, resolved.
+      // The value below can never be anything but the false default; the
+      // *SourceUnknown flag tells the UI not to present that default as fact.
       callTimeoutHandlingEnabled: detail.callPolicies?.callTimeoutHandlingEnabled ?? false,
+      callTimeoutHandlingSourceUnknown: true,
       callBounceEnabled: detail.callPolicies?.callBounce?.callBounceEnabled ?? false,
       callBounceMaxRings: detail.callPolicies?.callBounce?.callBounceMaxRings,
       callBounceOnAgentUnavailableEnabled: detail.callPolicies?.callBounce?.agentUnavailableEnabled ?? false,
@@ -379,8 +384,11 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       comfortMessageBypassEnabled: qs?.comfortMessageBypass?.enabled ?? false,
       comfortMessageBypassThreshold: qs?.comfortMessageBypass?.callWaitingAgeThreshold,
       whisperMessageEnabled: qs?.whisperMessage?.enabled ?? false,
+      // Confirmed absent from the entire public OpenAPI spec — see FLAGGED_ITEMS.md
+      // #2, resolved. Same rationale as callTimeoutHandlingSourceUnknown above.
       priorityEscalationEnabled: hasPriorityEsc,
       priorityEscalationThreshold: detail.callPolicies?.transferToAgentAfterN,
+      priorityEscalationSourceUnknown: true,
       digitalHandoffEnabled: hasDigitalHandoff,
     } as NodeData,
   });
@@ -426,7 +434,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
           kind: 'playMessage',
           label: 'Night Service Announcement',
           messageType: ns.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-          audioFile: ns.audioFiles?.[0]?.name ?? '',
+          audioFile: ns.audioFiles?.[0]?.fileName ?? '',
         } as NodeData,
       });
       edges.push(mkEdge(`e-${gateId}-ns-ann`, gateId, nsAnnId, {
@@ -480,7 +488,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
           kind: 'playMessage',
           label: 'Holiday Announcement',
           messageType: holService.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-          audioFile: holService.audioFiles?.[0]?.name ?? '',
+          audioFile: holService.audioFiles?.[0]?.fileName ?? '',
         } as NodeData,
       });
       edges.push(mkEdge(`e-${gateId}-hol-ann`, gateId, holAnnId, {
@@ -731,7 +739,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       strData = {
         label: 'No Agents: Announcement',
         messageType: strandedCalls?.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-        audioFile: strandedCalls?.audioFiles?.[0]?.name ?? '',
+        audioFile: strandedCalls?.audioFiles?.[0]?.fileName ?? '',
       };
     }
 

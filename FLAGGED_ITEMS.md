@@ -8,41 +8,43 @@ field this project currently models. Resolving any of these requires a fresh liv
 capture (via the in-app `?debugApi=1` debug panel) of a queue configured to exercise
 the specific setting in question.
 
-## 1. `audioFiles` field name: `name` vs. `fileName`
+## 1. ~~`audioFiles` field name: `name` vs. `fileName`~~ — RESOLVED
 
-- **Where:** `WebexQueueNightService.audioFiles`, `WebexQueueHolidayService.audioFiles`,
-  `WebexQueueStrandedCalls.audioFiles`, `WebexQueueForcedForward.audioFiles`,
-  `WebexQueueOverflow` (Overflow's own `audioFiles`) — all in `src/types/webex.ts`.
-- **Conflict:** Existing code comments state each of these shapes was "confirmed
-  against a live org response" using `{ id, name }`. The OpenAPI spec's
-  `WebexAudioAnnouncementFile` (used correctly elsewhere, e.g. DNIS announcements)
-  says the field is `{ id, fileName, level, mediaFileType, isTextToSpeech }`.
-- **Why not resolved:** The live captures that produced the `{ id, name }` comment
-  may not have had a populated `audioFiles` array (i.e., the queue was still on the
-  default greeting, so no custom file was ever present in the sample to check the
-  field name against). Changing this without evidence risks trading a possibly-correct
-  live-confirmed name for a guess.
-- **To resolve:** Capture a live response for a Night/Holiday/Stranded/ForcedForward/
-  Overflow config with a **custom audio file actually uploaded**, and check the real
-  key name in `audioFiles[0]`.
+- **Where:** `WebexQueueNightService.audioFiles`/`.manualAudioFiles`,
+  `WebexQueueHolidayService.audioFiles`, `WebexQueueStrandedCalls.audioFiles`,
+  `WebexQueueForcedForward.audioFiles` — all in `src/types/webex.ts`.
+- **Resolution:** Confirmed via five separate live captures (queue-level DNIS
+  announcements, Forced Forward, Night Service, Holiday Service, Stranded Calls'
+  `ANNOUNCEMENT` action) — every sample shows `fileName`, none show `name`. All five
+  interfaces now use the shared `WebexAudioAnnouncementFile` type (already correct
+  for DNIS announcements) instead of a separate unconfirmed inline shape. Updated the
+  four read sites in `importCallQueue.ts` (Night/Holiday/ForcedForward/Stranded
+  announcement nodes) from `.name` to `.fileName`.
+- **Note:** `WebexQueueOverflow` does not currently model an `audioFiles` field at
+  all (only `greeting`), so there was nothing to fix there.
 
-## 2. `callPolicies` fields not present in the spec's schema
+## 2. ~~`callPolicies` fields not present in the spec's schema~~ — RESOLVED
 
 - **Where:** `WebexQueueCallPolicies.waitingTreatmentEnabled`, `.callTimeoutHandlingEnabled`,
   `.transferToAgentEnabled`, `.transferToAgentAfterN` — `src/types/webex.ts`. Used for
   Priority Escalation and Call Timeout Handling (`src/utils/importCallQueue.ts`:
   `hasPriorityEsc`, `callTimeoutHandlingEnabled` on the Queue node).
-- **Conflict:** The spec's `GetCallQueueEssentialsObject.callPolicies` schema only
-  documents four properties: `policy`, `callBounce`, `distinctiveRing`, `routingType`.
-  These four fields aren't part of it at all.
-- **Why not resolved:** Unclear whether these fields (a) don't really exist and were
-  always a guess that happened not to break anything, (b) live under a different
-  parent object not yet located, or (c) are present in a real response but omitted
-  from this particular spec schema. No live capture has specifically checked for
-  Priority Escalation or Call Timeout Handling being enabled.
-- **To resolve:** Capture a live response for a queue with Priority Escalation and/or
-  Call Timeout Handling enabled in Control Hub, and check whether these fields appear
-  under `callPolicies` or elsewhere.
+- **Resolution:** Confirmed absent from the **entire** public Webex Cloud Calling
+  OpenAPI spec — not just `callPolicies`. Searched the whole spec file for
+  `transferToAgent`, `waitingTreatment`, `callTimeoutHandling`, and escalation-related
+  terms: zero matches anywhere. Also confirmed `GetCallQueueEssentialsObject` (the
+  Get-details-for-a-Call-Queue-or-Customer-Assist-Queue response) has no `allOf`
+  composition to hide an extra branch, and `ModifyCallQueueObject` (the write schema)
+  has an identical, equally bare `callPolicies` shape. These fields are not
+  API-exposed at all, in either direction.
+- **Flow Designer fix:** Since the value can never be anything but a guessed `false`
+  default on import, added `priorityEscalationSourceUnknown` /
+  `callTimeoutHandlingSourceUnknown` flags — set `true` only by the importer (never
+  set for manually-built flows). `PropertiesPanel.tsx`'s `QueueFields` now shows an
+  explicit "Not available via API — configure manually if used" note whenever a flag
+  is set, instead of silently presenting an unchecked checkbox / omitted section as if
+  it were confirmed Webex state. The underlying toggles remain fully editable in both
+  imported and manually-built flows.
 
 ## 3. CX Essentials `queueSettings` fields not found in the base spec dump
 

@@ -1140,6 +1140,11 @@ function QueueFields({ data, update }: FieldProps) {
         <Checkbox label="Offer Callback" checked={data.callbackEnabled ?? false} onChange={(v) => update({ callbackEnabled: v })} />
         <Checkbox label="Allow Agents to Join/Unjoin" checked={data.agentJoinEnabled ?? true} onChange={(v) => update({ agentJoinEnabled: v })} />
         <Checkbox label="Enable Call Timeout Handling" checked={data.callTimeoutHandlingEnabled ?? false} onChange={(v) => update({ callTimeoutHandlingEnabled: v })} />
+        {data.callTimeoutHandlingSourceUnknown && (
+          <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+            Not available via API — configure manually if used.
+          </div>
+        )}
         <Checkbox label="Comfort Message" checked={data.comfortMessageEnabled ?? false} onChange={(v) => update({ comfortMessageEnabled: v })} />
         {data.comfortMessageEnabled && (
           <Field label="Time Between Messages (s)">
@@ -1195,9 +1200,9 @@ function QueueFields({ data, update }: FieldProps) {
         )}
       </FieldGroup>
 
-      {(data.priorityEscalationEnabled || data.digitalHandoffEnabled) && (
+      {(data.priorityEscalationEnabled || data.digitalHandoffEnabled || data.priorityEscalationSourceUnknown) && (
         <FieldGroup label="Escalation & Handoff">
-          {data.priorityEscalationEnabled && (
+          {data.priorityEscalationEnabled ? (
             <>
               <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
                 <span className="font-medium text-slate-600">Priority Escalation enabled</span> — configured via the
@@ -1212,7 +1217,12 @@ function QueueFields({ data, update }: FieldProps) {
                 />
               </Field>
             </>
-          )}
+          ) : data.priorityEscalationSourceUnknown ? (
+            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+              <span className="font-medium text-slate-600">Priority Escalation</span> — not available via API;
+              configure manually if used (add a "Priority Escalation" transfer node to the canvas).
+            </div>
+          ) : null}
           {data.digitalHandoffEnabled && (
             <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-700 leading-relaxed">
               <span className="font-medium">Digital Handoff enabled</span> — configured via the separate

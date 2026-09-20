@@ -451,7 +451,9 @@ export interface WebexQueueNightService {
   playAnnouncementBeforeEnabled?: boolean;
   announcementMode?: 'NORMAL' | string;
   audioMessageSelection?: 'DEFAULT' | 'CUSTOM' | string;
-  audioFiles?: Array<{ id?: string; name?: string }>;
+  // Confirmed via live capture (see FLAGGED_ITEMS.md #1, resolved): the real field is
+  // fileName, not name — WebexAudioAnnouncementFile is the confirmed shape everywhere.
+  audioFiles?: WebexAudioAnnouncementFile[];
   businessHoursLevel?: 'LOCATION' | 'ORGANIZATION';
   businessHoursName?: string;
   // Not present in the confirmed sample (this queue has no holiday routing tied to night
@@ -461,7 +463,7 @@ export interface WebexQueueNightService {
   holidayScheduleLevel?: 'LOCATION' | 'ORGANIZATION';
   forceNightServiceEnabled?: boolean;
   manualAudioMessageSelection?: 'DEFAULT' | 'CUSTOM' | string;
-  manualAudioFiles?: Array<{ id?: string; name?: string }>;
+  manualAudioFiles?: WebexAudioAnnouncementFile[];
   businessHourSchedules?: Array<{ scheduleName?: string; scheduleLevel?: 'LOCATION' | 'ORGANIZATION' }>;
 }
 
@@ -483,7 +485,8 @@ export interface WebexQueueHolidayService {
   transferPhoneNumber?: string;
   playAnnouncementBeforeEnabled?: boolean;
   audioMessageSelection?: 'DEFAULT' | 'CUSTOM' | string;
-  audioFiles?: Array<{ id?: string; name?: string }>;
+  // Confirmed via live capture (see FLAGGED_ITEMS.md #1, resolved): fileName, not name.
+  audioFiles?: WebexAudioAnnouncementFile[];
 }
 
 // Forced Forward — confirmed against a live org response. Always transfers to
@@ -494,7 +497,8 @@ export interface WebexQueueForcedForward {
   transferPhoneNumber?: string;
   playAnnouncementBeforeEnabled?: boolean;
   audioMessageSelection?: 'DEFAULT' | 'CUSTOM' | string;
-  audioFiles?: Array<{ id?: string; name?: string }>;
+  // Confirmed via live capture (see FLAGGED_ITEMS.md #1, resolved): fileName, not name.
+  audioFiles?: WebexAudioAnnouncementFile[];
 }
 
 // DNIS — the endorsed replacement for the legacy Alternate Numbers feature (per
@@ -602,7 +606,8 @@ export interface WebexQueueStrandedCalls {
   action?: 'NONE' | 'BUSY' | 'TRANSFER' | 'NIGHT_SERVICE' | 'RINGING' | 'ANNOUNCEMENT';
   transferPhoneNumber?: string;   // only meaningful when action === 'TRANSFER'; present-but-unused in other samples
   audioMessageSelection?: 'DEFAULT' | 'CUSTOM' | string;
-  audioFiles?: Array<{ id?: string; name?: string }>;
+  // Confirmed via live capture (see FLAGGED_ITEMS.md #1, resolved): fileName, not name.
+  audioFiles?: WebexAudioAnnouncementFile[];
   triggerPolicyWhenAllAgentsAreUnreachableEnabled?: boolean;
 }
 
