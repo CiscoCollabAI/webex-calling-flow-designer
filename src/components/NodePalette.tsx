@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import { NODE_DEFINITIONS, CATEGORY_LABELS, CATEGORY_COLORS, type NodeCategory, type NodeKind, type CanvasMode } from '../types';
 import { ChevronDown, ChevronRight, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { getNodeIcon } from '../nodes/nodeIcons';
+import { useFlowStore } from '../store/flowStore';
 
 // Nodes excluded from the palette per canvas mode
 const MODE_EXCLUDES: Partial<Record<NonNullable<CanvasMode>, Set<NodeKind>>> = {
@@ -25,6 +27,7 @@ interface NodePaletteProps {
 const CATEGORY_ORDER: NodeCategory[] = ['control', 'voice', 'routing', 'time', 'transfer', 'integration'];
 
 export function NodePalette({ onDragStart, collapsed, onToggleCollapse, canvasMode }: NodePaletteProps) {
+  const readOnly = useFlowStore((s) => s.readOnly);
   const [collapsedCats, setCollapsedCats] = useState<Set<NodeCategory>>(new Set());
   const [search, setSearch] = useState('');
 
@@ -55,11 +58,12 @@ export function NodePalette({ onDragStart, collapsed, onToggleCollapse, canvasMo
 
   const handleDragStart = useCallback(
     (e: React.DragEvent, kind: NodeKind) => {
+      if (readOnly) { e.preventDefault(); return; }
       e.dataTransfer.setData('application/flow-node', kind);
       e.dataTransfer.effectAllowed = 'copy';
       onDragStart(kind);
     },
-    [onDragStart]
+    [onDragStart, readOnly]
   );
 
   // Collapsed panel: show only a narrow column with a toggle button
@@ -104,7 +108,11 @@ export function NodePalette({ onDragStart, collapsed, onToggleCollapse, canvasMo
       </div>
 
       {/* Canvas mode indicator */}
-      {canvasMode ? (
+      {readOnly ? (
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-100">
+          <p className="text-xs text-amber-700">Viewing mode — switch to Editing in the toolbar to add nodes</p>
+        </div>
+      ) : canvasMode ? (
         <div className={`px-4 py-2 border-b text-xs font-medium flex items-center gap-1.5 border ${MODE_LABEL[canvasMode].style}`}>
           <span className="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0" />
           {MODE_LABEL[canvasMode].text} mode
@@ -123,7 +131,7 @@ export function NodePalette({ onDragStart, collapsed, onToggleCollapse, canvasMo
               <div className="text-xs text-slate-400 text-center py-8">No nodes found</div>
             ) : (
               filtered.map((n) => (
-                <NodeItem key={n.kind} def={n} onDragStart={handleDragStart} />
+                <NodeItem key={n.kind} def={n} onDragStart={handleDragStart} readOnly={readOnly} />
               ))
             )}
           </div>
@@ -156,7 +164,7 @@ export function NodePalette({ onDragStart, collapsed, onToggleCollapse, canvasMo
                 {!isCatCollapsed && (
                   <div className="px-3 pb-2 space-y-1">
                     {nodes.map((n) => (
-                      <NodeItem key={n.kind} def={n} onDragStart={handleDragStart} />
+                      <NodeItem key={n.kind} def={n} onDragStart={handleDragStart} readOnly={readOnly} />
                     ))}
                   </div>
                 )}
@@ -179,23 +187,27 @@ export function NodePalette({ onDragStart, collapsed, onToggleCollapse, canvasMo
 function NodeItem({
   def,
   onDragStart,
+  readOnly,
 }: {
   def: (typeof NODE_DEFINITIONS)[0];
   onDragStart: (e: React.DragEvent, kind: NodeKind) => void;
+  readOnly?: boolean;
 }) {
   return (
     <div
-      draggable
+      draggable={!readOnly}
       onDragStart={(e) => onDragStart(e, def.kind)}
-      className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-grab active:cursor-grabbing hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all select-none group"
-      title={def.description}
+      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent transition-all select-none group ${
+        readOnly ? 'opacity-40 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing hover:bg-slate-50 hover:border-slate-200'
+      }`}
+      title={readOnly ? 'Switch to Editing to add nodes' : def.description}
     >
       <div
         className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105"
         style={{ background: def.bgColor, border: `1.5px solid ${def.borderColor}` }}
       >
         <span style={{ color: def.borderColor }}>
-          {getSmallIcon(def.icon)}
+          {getNodeIcon(def.icon, 16)}
         </span>
       </div>
       <div className="flex-1 min-w-0">
@@ -210,24 +222,4 @@ function NodeItem({
       </div>
     </div>
   );
-}
-
-function getSmallIcon(name: string) {
-  const icons: Record<string, React.ReactNode> = {
-    PhoneIncoming: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 12a19.79 19.79 0 01-3.07-8.67A2 2 0 012 1.09h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 8.91a16 16 0 006 6l1.19-1.19a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/><polyline points="9 11 12 8 15 11"/><line x1="12" y1="8" x2="12" y2="16"/></svg>,
-    PhoneOff: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45c1.12.45 2.3.75 3.53.75a2 2 0 012 2v3.5a2 2 0 01-2 2A18.5 18.5 0 012 4.5a2 2 0 012-2H7.5a2 2 0 012 2c0 1.23.3 2.41.75 3.53a2 2 0 01-.45 2.11L8.59 11.3a16 16 0 002.09 2.01z"/><line x1="23" y1="1" x2="1" y2="23"/></svg>,
-    LayoutGrid: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
-    Volume2: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>,
-    Hash: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>,
-    Users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
-    UserCheck: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>,
-    Clock: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-    PhoneForwarded: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><polyline points="19 1 23 5 19 9"/><line x1="15" y1="5" x2="23" y2="5"/><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 12a19.79 19.79 0 01-3.07-8.67A2 2 0 012 1.09h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 8.91a16 16 0 006 6l1.19-1.19a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>,
-    Voicemail: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><circle cx="5.5" cy="11.5" r="4.5"/><circle cx="18.5" cy="11.5" r="4.5"/><line x1="5.5" y1="16" x2="18.5" y2="16"/></svg>,
-    GitBranch: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>,
-    Globe: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>,
-    PhoneCall: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 12a19.79 19.79 0 01-3.07-8.67A2 2 0 012 1.09h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 8.91a16 16 0 006 6l1.19-1.19a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/><path d="M15 7a3 3 0 11-6 0"/></svg>,
-    Variable: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M8 3H7a2 2 0 00-2 2v5a2 2 0 01-2 2 2 2 0 012 2v5a2 2 0 002 2h1"/><path d="M16 3h1a2 2 0 012 2v5a2 2 0 002 2 2 2 0 00-2 2v5a2 2 0 01-2 2h-1"/></svg>,
-  };
-  return icons[name] || <span>●</span>;
 }

@@ -7,6 +7,8 @@ import {
 import { NODE_DEFINITIONS } from '../types';
 import type { NodeData, NodeKind } from '../types';
 import { BaseNode } from './BaseNode';
+import { summarizeBusinessHours } from '../utils/businessHoursSummary';
+import { useFlowStore } from '../store/flowStore';
 
 // Icon + accent color per node kind — used in both MenuNode rows and MenuKeyBanner
 const KIND_META: Partial<Record<NodeKind, { Icon: React.ComponentType<{ size?: number; className?: string; color?: string }>; color: string }>> = {
@@ -147,12 +149,19 @@ export const MenuNode = memo(({ id, data, selected }: NodeProps) => {
 export const PlayMessageNode = memo(({ id, data, selected }: NodeProps) => {
   const nd = data as NodeData;
   const def = getDef('playMessage');
+  // Webex Calling Call Queue announcements only offer "Default" or "Custom" audio —
+  // there's no live Text-to-Speech option, so nodes generated from real Call Queue
+  // import data (cqAnnouncementSource) say "Webex Default" here instead of "TTS".
+  // Hand-built/generic playMessage nodes (e.g. Post-Call Survey, palette-dragged
+  // prompts) keep "Text-to-Speech" since that hasn't been verified as inaccurate
+  // for those cases.
+  const nonAudioLabel = nd.cqAnnouncementSource ? 'Webex Default' : 'TTS';
   return (
-    <BaseNode id={id} data={nd} selected={selected} def={def} outputCount={1}>
+    <BaseNode id={id} data={nd} selected={selected} def={def} outputCount={1} subtitle={nd.nodeSubtitle}>
       {nd.menuKey && <MenuKeyBanner digit={nd.menuKey} kind="playMessage" label={nd.label} />}
       <div className="flex items-center gap-1.5 mb-1">
         <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-          {nd.messageType === 'audio' ? 'Audio File' : 'TTS'}
+          {nd.messageType === 'audio' ? 'Audio File' : nonAudioLabel}
         </span>
         {nd.language && <span className="text-xs text-slate-400">{nd.language}</span>}
       </div>
@@ -160,7 +169,18 @@ export const PlayMessageNode = memo(({ id, data, selected }: NodeProps) => {
         <div className="text-xs text-slate-600 line-clamp-2 italic">"{nd.messageText}"</div>
       )}
       {nd.audioFile && (
-        <div className="text-xs text-slate-600 font-mono truncate">{nd.audioFile}</div>
+        <>
+          {/* The resolved friendly label (when available) leads, matching this
+              app's plain-language-first convention; the raw system filename is
+              always shown too, never replaced — label is an addition, not a
+              substitute, since it's not guaranteed to be available. */}
+          {nd.audioFileLabel && (
+            <div className="text-xs font-medium text-slate-700 truncate">{nd.audioFileLabel}</div>
+          )}
+          <div className={`text-xs font-mono truncate ${nd.audioFileLabel ? 'text-slate-400' : 'text-slate-600'}`}>
+            {nd.audioFile}
+          </div>
+        </>
       )}
     </BaseNode>
   );
@@ -243,16 +263,42 @@ export const AgentDirectNode = memo(({ id, data, selected }: NodeProps) => {
 
 export const BusinessHoursNode = memo(({ id, data, selected }: NodeProps) => {
   const nd = data as NodeData;
+  const readOnly = useFlowStore((s) => s.readOnly);
   const def = getDef('businessHours');
-  const hasHoliday = !!nd.holidaySchedule;
+  // A Call Queue's standalone Holiday Service (no Night Service) is a 2-way
+  // Not-a-Holiday/Holiday check, not the usual Open/Closed(/Holiday) gate — it needs
+  // its own output count and labels rather than the hasHolidayBranch inference below.
+  const isHolidayOnly = nd.gateMode === 'holidayOnly';
+  // hasHolidayBranch is the authoritative flag when an importer sets it (it knows
+  // whether a separate Holiday action is actually wired to this gate). Manually-built
+  // gates don't set it, so they fall back to the original behavior: a holiday branch
+  // exists exactly when this gate has its own holiday schedule selected.
+  const hasHoliday = nd.hasHolidayBranch ?? !!nd.holidaySchedule;
+  const hoursSummary = summarizeBusinessHours(nd.businessHours);
+  const outputCount = isHolidayOnly ? 2 : hasHoliday ? 3 : 2;
+  const outputLabels = isHolidayOnly
+    ? ['Not a Holiday', 'Holiday']
+    : hasHoliday ? ['Open', 'Closed', 'Holiday'] : ['Open', 'Closed'];
+  // Precedence badge (Holiday=1, Night=2) — reinforces the rail shown above the
+  // canvas in View mode. Not shown in Edit mode or for manually-built gates.
+  const precedenceBadge = !readOnly ? undefined
+    : isHolidayOnly ? { text: '1', color: '#8b5cf6', title: 'Holiday Service — highest precedence' }
+    : hasHoliday ? { text: '1·2', color: '#8b5cf6', title: 'This gate checks Holiday (1) then Night Service (2)' }
+    : { text: '2', color: '#F59E0B', title: 'Night Service — 2nd in precedence, after Holiday Service' };
   return (
     <BaseNode id={id} data={nd} selected={selected} def={def}
-      outputCount={hasHoliday ? 3 : 2}
-      outputLabels={hasHoliday ? ['Open', 'Closed', 'Holiday'] : ['Open', 'Closed']}
+      outputCount={outputCount}
+      outputLabels={outputLabels}
+      badge={precedenceBadge}
     >
       <div className="font-medium text-xs text-slate-700 mb-1">
         {nd.scheduleName || 'Business Hours Schedule'}
       </div>
+      {hoursSummary ? (
+        <div className="text-xs text-slate-600">{hoursSummary}</div>
+      ) : nd.scheduleName ? (
+        <div className="text-xs text-slate-400 italic">Connect org to view hours</div>
+      ) : null}
       {nd.timezone && (
         <div className="text-xs text-slate-500">TZ: {nd.timezone}</div>
       )}
@@ -309,11 +355,20 @@ export const BranchNode = memo(({ id, data, selected }: NodeProps) => {
       outputCount={3}
       outputLabels={['Match', 'No Match', 'Error']}
     >
-      <div className="font-mono text-xs text-slate-700 bg-violet-50 rounded px-2 py-1">
-        {nd.variable || 'variable'}{' '}
-        <span className="text-violet-500">{nd.operator || '=='}</span>{' '}
-        {nd.compareValue ? `"${nd.compareValue}"` : '"value"'}
-      </div>
+      {/* Call Router (and any other informational use) shows its plain-English
+          nodeSubtitle in the body instead of a raw variable/operator/value
+          expression, which reads as source code to a non-technical viewer.
+          Genuine conditional-logic branch nodes (hand-built flows) keep the
+          expression, since that's their actual configured behavior. */}
+      {nd.nodeSubtitle ? (
+        <div className="text-xs text-slate-700">{nd.nodeSubtitle}</div>
+      ) : (
+        <div className="font-mono text-xs text-slate-700 bg-violet-50 rounded px-2 py-1">
+          {nd.variable || 'variable'}{' '}
+          <span className="text-violet-500">{nd.operator || '=='}</span>{' '}
+          {nd.compareValue ? `"${nd.compareValue}"` : '"value"'}
+        </div>
+      )}
     </BaseNode>
   );
 });

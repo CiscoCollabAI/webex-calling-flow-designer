@@ -104,7 +104,7 @@ export function Dashboard({ onOpenAA, onOpenQueue, onOpenCxQueue, openingId, onN
   const tab = TAB_CONFIG[activeTab];
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
+    <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col view-fade-in">
 
       {/* ── Org header ─────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-8 py-4 flex-shrink-0">

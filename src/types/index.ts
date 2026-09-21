@@ -90,6 +90,11 @@ export interface NodeData extends Record<string, unknown> {
   cqAllowCallWaitingForAgentsEnabled?: boolean;
   cqDigitalInboxEnabled?: boolean;
   cqAgents?: { name: string; extension?: string; phoneNumber?: string; agentType?: string; skillLevel?: number; joinEnabled?: boolean; weight?: number }[];
+  // True when the Webex API response for this import omitted the agents field
+  // entirely (vs. returning an empty list) — distinguishes "we don't know" from
+  // "confirmed zero agents" for imported queues, since both collapse to the same
+  // empty cqAgents array otherwise.
+  cqAgentsUnavailable?: boolean;
   cqCallbackEnabled?: boolean;
   cqCallForwardingEnabled?: boolean;
   cqCallForwardingDestination?: string;
@@ -111,14 +116,40 @@ export interface NodeData extends Record<string, unknown> {
     extension?: string;
     ringPattern?: string;
     customAnnouncementEnabled?: boolean;
-    announcementSummary?: { label: string; enabled: boolean; greeting?: string; fileName?: string; extra?: string }[];
+    announcementSummary?: { label: string; enabled: boolean; greeting?: string; fileName?: string; fileLabel?: string; extra?: string }[];
   }[];
+
+  // Precedence-chain flags (Holiday > Night > Forced Forward > Stranded), set once
+  // on the Start node by importCallQueue so the read-only View-mode canvas can show
+  // a precedence rail without re-deriving this from the generated node/edge graph.
+  cqHasHolidayService?: boolean;
+  cqHasNightService?: boolean;
+  cqHasForcedForward?: boolean;
+  cqHasStrandedPolicy?: boolean;
 
   // Play message node
   messageType?: 'tts' | 'audio';
   messageText?: string;
   audioFile?: string;
+  // Human-readable name resolved from the org's announcement library (org-level or
+  // location-level) or this queue's own announcement file listing, matched by the
+  // audio file's id. Only set when a match was actually found — audioFile (the raw
+  // filename) is always shown regardless; this is an addition, never a replacement.
+  audioFileLabel?: string;
   language?: string;
+  // True for playMessage nodes generated from real Call Queue import data (Welcome/
+  // Comfort/Night Service/Holiday/Overflow/Stranded/Forced Forward announcements) —
+  // Webex Calling only offers "Default" or "Custom" audio for these, never live
+  // Text-to-Speech, so the node shows "Webex Default" instead of "TTS". Left unset
+  // for hand-built/generic playMessage nodes (e.g. Post-Call Survey, palette-dragged
+  // prompts), where "Text-to-Speech" hasn't been verified as inaccurate.
+  cqAnnouncementSource?: boolean;
+  // Generic per-instance header subtitle for nodes that share one kind but need
+  // different subtitle text per instance — e.g. the policy name under a shared
+  // "Announcement" label (Night Service / Holiday / Overflow / Stranded Calls), or
+  // the routing type + pattern under "Call Router" — consistent with the Business
+  // Hours node's label/subtitle pattern. Passed through to BaseNode's subtitle prop.
+  nodeSubtitle?: string;
   voice?: string;
 
   // Menu / IVR node
@@ -192,6 +223,18 @@ export interface NodeData extends Record<string, unknown> {
   holidayScheduleLevel?: 'LOCATION' | 'ORGANIZATION';
   timezone?: string;
   businessHours?: BusinessHoursSchedule[];
+  // Explicit "does this gate wire a 3rd Holiday output" flag. Set by importers that
+  // know a separate Holiday action exists independently of this gate's own holiday
+  // schedule reference (e.g. Call Queue's standalone Holiday Service). When unset,
+  // node rendering falls back to inferring from holidaySchedule presence, which is
+  // the correct behavior for manually-built flows where one gate = one combined
+  // business-hours + holiday check.
+  hasHolidayBranch?: boolean;
+  // Distinguishes what kind of check this gate actually performs, since a Call
+  // Queue's standalone Holiday Service (no Night Service) produces a 2-way
+  // Not-a-Holiday/Holiday gate rather than the usual Open/Closed(/Holiday) gate.
+  // Unset for manually-built gates, which are always the 'nightService' shape.
+  gateMode?: 'nightService' | 'holidayOnly';
 
   // Transfer node
   transferType?: 'blind' | 'consultative' | 'queue';
@@ -258,9 +301,6 @@ export interface NodeDefinition {
   bgColor: string;
   borderColor: string;
   icon: string;
-  maxInputs?: number;
-  maxOutputs?: number;
-  outputLabels?: string[];
 }
 
 export const NODE_DEFINITIONS: NodeDefinition[] = [
@@ -273,8 +313,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#16A34A',
     borderColor: '#15803D',
     icon: 'PhoneIncoming',
-    maxInputs: 0,
-    maxOutputs: 1,
   },
   {
     kind: 'end',
@@ -285,8 +323,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#DC2626',
     borderColor: '#B91C1C',
     icon: 'PhoneOff',
-    maxInputs: 1,
-    maxOutputs: 0,
   },
   {
     kind: 'menu',
@@ -297,7 +333,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#DBEAFE',
     borderColor: '#3B82F6',
     icon: 'LayoutGrid',
-    maxOutputs: 12,
   },
   {
     kind: 'playMessage',
@@ -308,7 +343,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#F3E8FF',
     borderColor: '#A855F7',
     icon: 'Volume2',
-    maxOutputs: 1,
   },
   {
     kind: 'collectDigits',
@@ -319,8 +353,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#FFF7ED',
     borderColor: '#F97316',
     icon: 'Hash',
-    maxOutputs: 2,
-    outputLabels: ['Success', 'Timeout/Error'],
   },
   {
     kind: 'queue',
@@ -331,8 +363,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#E0F2FE',
     borderColor: '#0284C7',
     icon: 'Users',
-    maxOutputs: 3,
-    outputLabels: ['Answered', 'Max Wait', 'Full Queue'],
   },
   {
     kind: 'agentDirect',
@@ -343,8 +373,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#DCFCE7',
     borderColor: '#16A34A',
     icon: 'UserCheck',
-    maxOutputs: 2,
-    outputLabels: ['Connected', 'No Answer'],
   },
   {
     kind: 'huntGroup',
@@ -355,8 +383,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#EEF2FF',
     borderColor: '#4F46E5',
     icon: 'PhoneCall',
-    maxOutputs: 2,
-    outputLabels: ['Answered', 'No Answer'],
   },
   {
     kind: 'subAutoAttendant',
@@ -367,8 +393,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#FFF7ED',
     borderColor: '#EA580C',
     icon: 'CornerDownRight',
-    maxOutputs: 1,
-    outputLabels: ['Transferred'],
   },
   {
     kind: 'repeatMenu',
@@ -379,8 +403,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#FDF4FF',
     borderColor: '#A21CAF',
     icon: 'RotateCcw',
-    maxOutputs: 1,
-    outputLabels: ['Back to Menu'],
   },
   {
     kind: 'businessHours',
@@ -391,8 +413,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#FFFBEB',
     borderColor: '#F59E0B',
     icon: 'Clock',
-    maxOutputs: 3,
-    outputLabels: ['Open', 'Closed', 'Holiday'],
   },
   {
     kind: 'transfer',
@@ -403,8 +423,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#CCFBF1',
     borderColor: '#0D9488',
     icon: 'PhoneForwarded',
-    maxOutputs: 2,
-    outputLabels: ['Success', 'Failed'],
   },
   {
     kind: 'voicemail',
@@ -415,7 +433,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#F5F5F4',
     borderColor: '#78716C',
     icon: 'Voicemail',
-    maxOutputs: 1,
   },
   {
     kind: 'branch',
@@ -426,8 +443,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#EDE9FE',
     borderColor: '#7C3AED',
     icon: 'GitBranch',
-    maxOutputs: 3,
-    outputLabels: ['Match', 'No Match', 'Error'],
   },
   {
     kind: 'httpRequest',
@@ -438,8 +453,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#F1F5F9',
     borderColor: '#475569',
     icon: 'Globe',
-    maxOutputs: 2,
-    outputLabels: ['Success', 'Error'],
   },
   {
     kind: 'callback',
@@ -450,8 +463,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#DCFCE7',
     borderColor: '#22C55E',
     icon: 'PhoneCall',
-    maxOutputs: 2,
-    outputLabels: ['Accepted', 'Declined'],
   },
   {
     kind: 'setVariable',
@@ -462,7 +473,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: '#F0F9FF',
     borderColor: '#0EA5E9',
     icon: 'Variable',
-    maxOutputs: 1,
   },
 ];
 

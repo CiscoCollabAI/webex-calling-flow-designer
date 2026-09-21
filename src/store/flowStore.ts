@@ -12,6 +12,7 @@ export interface FlowDraft {
   flowMeta: FlowMeta;
   canvasMode: CanvasMode;
   savedAt: string;
+  readOnly?: boolean;
 }
 
 export function getFlowDraft(): FlowDraft | null {
@@ -64,6 +65,14 @@ interface FlowStore {
   fitViewTrigger: number;
   flowMeta: FlowMeta;
   publishState: PublishState;
+
+  // Read-only / edit mode — true whenever the canvas is showing a live Webex
+  // Calling resource rendered as-is (see App.tsx openResource). Build-from-scratch
+  // flows (newBlankFlow) default to false. All interactive mutators below are
+  // no-ops while this is true; the only way to flip it is the explicit global
+  // Toolbar switch — never per-node or per-field.
+  readOnly: boolean;
+  setReadOnly: (v: boolean) => void;
 
   setNodes: (nodes: Node<NodeData>[]) => void;
   setEdges: (edges: Edge[]) => void;
@@ -306,19 +315,30 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   flowMeta: { ...defaultFlowMeta },
   publishState: { ...defaultPublishState },
   draftSavedAt: null,
+  readOnly: false,
+
+  setReadOnly: (v) => set({ readOnly: v }),
 
   setNodes: (nodes) => set({ nodes, isDirty: true }),
   setEdges: (edges) => set({ edges, isDirty: true }),
 
   onNodesChange: (changes) => {
+    // Read-only still allows repositioning — dragging/auto-arrange don't touch
+    // Webex config, they only fix canvas layout/connector overlap. Structural
+    // changes (remove, etc.) are filtered out; only position/dimensions pass.
+    const applicable = get().readOnly
+      ? changes.filter((c) => c.type === 'position' || c.type === 'dimensions')
+      : changes;
+    if (applicable.length === 0) return;
     set((state) => ({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      nodes: applyNodeChanges(changes, state.nodes as any) as Node<NodeData>[],
+      nodes: applyNodeChanges(applicable, state.nodes as any) as Node<NodeData>[],
       isDirty: true,
     }));
   },
 
   onEdgesChange: (changes) => {
+    if (get().readOnly) return;
     set((state) => ({
       edges: applyEdgeChanges(changes, state.edges),
       isDirty: true,
@@ -326,6 +346,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   },
 
   onConnect: (connection) => {
+    if (get().readOnly) return;
     set((state) => ({
       edges: addEdge(
         {
@@ -343,6 +364,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   selectNode: (id) => set({ selectedNodeId: id }),
 
   updateNodeData: (id, data) => {
+    if (get().readOnly) return;
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, ...data } } : n
@@ -352,6 +374,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   },
 
   addNode: (kind, position) => {
+    if (get().readOnly) return;
     const id = `${kind}-${++nodeIdCounter}`;
     const newNode: Node<NodeData> = {
       id,
@@ -367,6 +390,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   },
 
   deleteNode: (id) => {
+    if (get().readOnly) return;
     set((state) => ({
       nodes: state.nodes.filter((n) => n.id !== id),
       edges: state.edges.filter((e) => e.source !== id && e.target !== id),
@@ -375,7 +399,10 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     }));
   },
 
-  setFlowName: (name) => set({ flowName: name, isDirty: true }),
+  setFlowName: (name) => {
+    if (get().readOnly) return;
+    set({ flowName: name, isDirty: true });
+  },
 
   setFlowMeta: (meta) => set((s) => ({ flowMeta: { ...s.flowMeta, ...meta } })),
 
@@ -398,13 +425,15 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   requestFitView: () => set((s) => ({ fitViewTrigger: s.fitViewTrigger + 1 })),
 
   autoLayout: () => {
+    // Allowed in read-only mode too — it only repositions nodes, same as manual
+    // dragging above; it never touches config.
     const { nodes, edges, fitViewTrigger } = get();
     const laid = autoLayout(nodes, edges);
     set({ nodes: laid, isDirty: true, fitViewTrigger: fitViewTrigger + 1 });
   },
 
   saveDraft: (canvasMode) => {
-    const { nodes, edges, flowName, flowMeta } = get();
+    const { nodes, edges, flowName, flowMeta, readOnly } = get();
     const draft: FlowDraft = {
       flowName,
       nodes,
@@ -412,6 +441,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       flowMeta,
       canvasMode,
       savedAt: new Date().toISOString(),
+      readOnly,
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     set({ isDirty: false, draftSavedAt: draft.savedAt });
@@ -428,6 +458,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       edges: draft.edges,
       flowName: draft.flowName,
       flowMeta: draft.flowMeta,
+      readOnly: draft.readOnly ?? false,
       isDirty: false,
       draftSavedAt: draft.savedAt,
       publishState: { ...defaultPublishState },
@@ -449,6 +480,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
         flowName: parsed.flowName || 'Imported Flow',
         selectedNodeId: null,
         isDirty: false,
+        readOnly: false,
         // flowMeta is set by App.tsx after a Webex org import; reset publish state only
         publishState: { ...defaultPublishState },
       });
@@ -463,6 +495,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       edges: initialEdges,
       selectedNodeId: null,
       isDirty: false,
+      readOnly: false,
       flowMeta: { ...defaultFlowMeta, isNew: true },
       publishState: { ...defaultPublishState },
     });
@@ -479,6 +512,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       edges: [],
       selectedNodeId: null,
       isDirty: false,
+      readOnly: false,
       publishState: { ...defaultPublishState },
       fitViewTrigger: s.fitViewTrigger + 1,
     }));

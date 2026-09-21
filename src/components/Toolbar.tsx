@@ -3,7 +3,7 @@ import {
   Upload, Download, Trash2, CheckCircle, XCircle,
   ZoomIn, ZoomOut, Maximize2, Play, FileText, AlertTriangle, Building2, LayoutGrid,
   LayoutDashboard, GitBranch, X, PhoneIncoming, Users, Headphones, CloudUpload, Plus,
-  Bookmark, BookmarkCheck,
+  Bookmark, BookmarkCheck, Eye, Pencil,
 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '../store/flowStore';
@@ -21,10 +21,10 @@ interface ValidationResult {
   errors: string[];
 }
 
-const MODE_CONFIG: Record<NonNullable<CanvasMode>, { label: string; icon: React.ReactNode; bg: string; text: string; border: string }> = {
-  aa:  { label: 'Auto Attendant', icon: <PhoneIncoming size={12} />, bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE' },
-  cq:  { label: 'Call Queue',     icon: <Users size={12} />,         bg: '#EEF2FF', text: '#4338CA', border: '#C7D2FE' },
-  cxe: { label: 'CX Essentials',  icon: <Headphones size={12} />,   bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE' },
+const MODE_CONFIG: Record<NonNullable<CanvasMode>, { label: string; description: string; icon: React.ReactNode; bg: string; text: string; border: string }> = {
+  aa:  { label: 'Auto Attendant', description: 'IVR menu flow — routes callers with keypresses and business-hours schedules', icon: <PhoneIncoming size={12} />, bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE' },
+  cq:  { label: 'Call Queue',     description: 'Agent queue flow — holds callers until an agent is available', icon: <Users size={12} />,         bg: '#EEF2FF', text: '#4338CA', border: '#C7D2FE' },
+  cxe: { label: 'CX Essentials',  description: 'Webex Customer Experience Essentials — a Call Queue with extra features: skills routing, wrap-up, post-call survey, digital handoff', icon: <Headphones size={12} />,   bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE' },
 };
 
 interface ToolbarProps {
@@ -38,7 +38,7 @@ interface ToolbarProps {
 export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNewFlow }: ToolbarProps) {
   const {
     flowName, setFlowName, exportFlow, importFlow, clearFlow, validateFlow, isDirty, autoLayout,
-    flowMeta, resetPublish, saveDraft, draftSavedAt,
+    flowMeta, resetPublish, saveDraft, draftSavedAt, readOnly, setReadOnly,
   } = useFlowStore();
 
   const { zoomIn, zoomOut, fitView } = useReactFlow();
@@ -123,6 +123,13 @@ export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNew
             onKeyDown={(e) => e.key === 'Enter' && handleNameCommit()}
             className="text-sm font-semibold text-slate-800 bg-slate-100 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 max-w-56"
           />
+        ) : readOnly ? (
+          <span
+            className="text-sm font-semibold text-slate-800 truncate max-w-56"
+            title="Switch to Editing to rename"
+          >
+            {flowName}
+          </span>
         ) : (
           <button
             onClick={() => { setEditingName(true); setNameVal(flowName); }}
@@ -150,6 +157,7 @@ export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNew
       {canvasMode && view === 'canvas' && (
         <div
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0 border"
+          title={MODE_CONFIG[canvasMode].description}
           style={{
             background: MODE_CONFIG[canvasMode].bg,
             color:      MODE_CONFIG[canvasMode].text,
@@ -167,6 +175,38 @@ export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNew
               <X size={11} />
             </button>
           )}
+        </div>
+      )}
+
+      {/* Read-only / Edit mode switch — the single explicit, global control that
+          gates every change to a rendered Webex Calling flow. Deliberately a
+          labeled two-state switch, not an icon toggle, so flipping it is a
+          conscious action rather than an easy-to-miss click. */}
+      {canvasMode && view === 'canvas' && (
+        <div
+          className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0"
+          title={readOnly ? 'Viewing — switch to Editing to change this flow' : 'Editing — changes can be published back to Webex'}
+        >
+          <button
+            onClick={() => setReadOnly(true)}
+            className={[
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+              readOnly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+            ].join(' ')}
+          >
+            <Eye size={13} />
+            <span className="hidden sm:inline">Viewing</span>
+          </button>
+          <button
+            onClick={() => setReadOnly(false)}
+            className={[
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+              !readOnly ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700',
+            ].join(' ')}
+          >
+            <Pencil size={13} />
+            <span className="hidden sm:inline">Editing</span>
+          </button>
         </div>
       )}
 
@@ -214,10 +254,15 @@ export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNew
 
       {/* Zoom controls */}
       <div className="flex items-center gap-1 flex-shrink-0">
-        <ToolbarBtn onClick={() => zoomOut()} title="Zoom out" icon={<ZoomOut size={15} />} />
-        <ToolbarBtn onClick={() => zoomIn()} title="Zoom in" icon={<ZoomIn size={15} />} />
-        <ToolbarBtn onClick={() => fitView({ padding: 0.15, duration: 300 })} title="Fit to view" icon={<Maximize2 size={15} />} />
-        <ToolbarBtn onClick={() => autoLayout()} title="Auto arrange nodes" icon={<LayoutGrid size={15} />} label="Auto Arrange" />
+        <ToolbarBtn onClick={() => zoomOut()} title="Zoom out" icon={<ZoomOut size={15} />} label="Zoom Out" />
+        <ToolbarBtn onClick={() => zoomIn()} title="Zoom in" icon={<ZoomIn size={15} />} label="Zoom In" />
+        <ToolbarBtn onClick={() => fitView({ padding: 0.15, duration: 300 })} title="Fit to view" icon={<Maximize2 size={15} />} label="Fit View" />
+        <ToolbarBtn
+          onClick={() => autoLayout()}
+          title="Auto arrange nodes — repositioning is allowed even while Viewing"
+          icon={<LayoutGrid size={15} />}
+          label="Auto Arrange"
+        />
       </div>
 
       <div className="w-px h-8 bg-slate-200 flex-shrink-0" />
@@ -229,14 +274,16 @@ export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNew
           <ToolbarBtn
             onClick={handleOpenPublish}
             title={
-              hasWriteScope === false
+              readOnly
+                ? 'Switch to Editing before publishing changes'
+                : hasWriteScope === false
                 ? 'Write scope missing — add spark-admin:telephony_config_write to your token'
                 : `Publish ${flowMeta.isNew ? '(create)' : '(update)'} to Webex`
             }
             icon={<CloudUpload size={14} />}
             label="Publish"
             publish
-            disabled={hasWriteScope === false}
+            disabled={hasWriteScope === false || readOnly}
           />
         )}
         <ToolbarBtn
@@ -286,6 +333,7 @@ export function Toolbar({ view, onViewChange, canvasMode, onClearMode, onOpenNew
           }}
           title="Clear canvas"
           icon={<Trash2 size={14} />}
+          label="Clear"
           danger
         />
       </div>

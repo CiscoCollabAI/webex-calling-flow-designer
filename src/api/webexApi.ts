@@ -20,6 +20,7 @@ import {
   type WebexQueueDnisAnnouncements,
   type WebexQueueCallForwarding,
   type WebexQueueDnisSettings,
+  type WebexQueueAnnouncementFile,
   type WebexTokenInfo,
   type WebexAAWriteBody,
   type WebexQueueWriteBody,
@@ -209,9 +210,12 @@ export class WebexApiService {
     return this.fetchList<WebexUser>('/people', 'items', { callingData: 'true' });
   }
 
-  async getSchedules(): Promise<WebexSchedule[]> {
-    // Org-level schedules (includes both businessHours and holidays types)
-    return this.fetchList<WebexSchedule>('/telephony/config/schedules', 'schedules');
+  async getSchedules(locationId: string): Promise<WebexSchedule[]> {
+    // Confirmed against Webex's official API docs (developer.webex.com/calling/docs/
+    // api/v1/location-call-settings-schedules) — schedules are only listable per
+    // location; there is no org-wide /telephony/config/schedules endpoint (the prior
+    // path 404'd for every org, which is why Business Hours never resolved).
+    return this.fetchList<WebexSchedule>(`/telephony/config/locations/${locationId}/schedules`, 'schedules');
   }
 
   async getPhoneNumbers(): Promise<WebexNumber[]> {
@@ -298,6 +302,22 @@ export class WebexApiService {
   async getQueueDnisSettings(locationId: string, queueId: string): Promise<WebexQueueDnisSettings> {
     return this.fetch<WebexQueueDnisSettings>(
       `/telephony/config/locations/${locationId}/queues/${queueId}/dnis/settings`,
+    );
+  }
+
+  // Confirmed via Webex's API docs (developer.webex.com/calling/docs/api/v1/
+  // features-call-queue/read-the-list-of-call-queue-announcement-files) — lists
+  // announcement files associated with this specific queue. Tried because the
+  // org-wide Announcement Repository (getAnnouncements) came back empty for a real
+  // org that clearly has custom audio in its queue policies — this queue-scoped
+  // list is more precisely targeted, though its documented response fields
+  // (id, fileName, fileSize, mediaFileType, level) don't obviously include a
+  // separate friendly name distinct from fileName; kept optional/defensive below
+  // in case that's incomplete rather than confirmed absent.
+  async getQueueAnnouncementFiles(locationId: string, queueId: string): Promise<WebexQueueAnnouncementFile[]> {
+    return this.fetchList<WebexQueueAnnouncementFile>(
+      `/telephony/config/locations/${locationId}/queues/${queueId}/announcements`,
+      'announcements',
     );
   }
 
@@ -408,11 +428,14 @@ export class WebexApiService {
 
   // ── Announcement listing + upload ────────────────────────────────────────────
 
-  async getAnnouncements(locationId: string): Promise<WebexAnnouncement[]> {
-    return this.fetchList<WebexAnnouncement>(
-      `/telephony/config/locations/${locationId}/announcements`,
-      'announcements',
-    );
+  async getAnnouncements(): Promise<WebexAnnouncement[]> {
+    // Confirmed against Webex's official API docs (developer.webex.com/docs/api/v1/
+    // features-announcement-repository) — the opposite shape from schedules: this one
+    // is org-wide (returns both org- and location-level greetings in one call), not
+    // per-location. The prior /telephony/config/locations/{id}/announcements path
+    // 404'd for every org, which is why audio files always fell back to their raw
+    // system-generated fileName.
+    return this.fetchList<WebexAnnouncement>('/telephony/config/announcements', 'announcements');
   }
 
   async uploadAnnouncement(

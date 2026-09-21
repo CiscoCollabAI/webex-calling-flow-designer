@@ -8,9 +8,12 @@ import {
   ConnectionLineType,
   SelectionMode,
 } from '@xyflow/react';
+import { AlertTriangle } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from '../nodes/nodeTypes';
 import { useFlowStore } from '../store/flowStore';
+import { NodeLegend } from './NodeLegend';
+import { PrecedenceRail } from './PrecedenceRail';
 import type { NodeKind } from '../types';
 
 interface FlowCanvasProps {
@@ -23,8 +26,13 @@ export function FlowCanvas({ dragNodeKind, onDragEnd }: FlowCanvasProps) {
     nodes, edges,
     onNodesChange, onEdgesChange, onConnect,
     selectNode, addNode,
-    fitViewTrigger,
+    fitViewTrigger, readOnly,
   } = useFlowStore();
+
+  // Forced Forwarding needs an always-visible explanation when it's active —
+  // not just a tooltip someone has to think to hover. Read directly off the
+  // Start node's imported flag rather than inferring it from bypassed nodes.
+  const forcedForwardActive = !!nodes.find((n) => n.data.kind === 'start')?.data.cqHasForcedForward;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rfInstance = useRef<any>(null);
@@ -38,6 +46,7 @@ export function FlowCanvas({ dragNodeKind, onDragEnd }: FlowCanvasProps) {
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+      if (readOnly) return;
       const kind = event.dataTransfer.getData('application/flow-node') as NodeKind;
       if (!kind || !rfInstance.current || !containerRef.current) return;
 
@@ -50,7 +59,7 @@ export function FlowCanvas({ dragNodeKind, onDragEnd }: FlowCanvasProps) {
       addNode(kind, { x: position.x - 100, y: position.y - 40 });
       onDragEnd();
     },
-    [addNode, onDragEnd]
+    [addNode, onDragEnd, readOnly]
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -75,6 +84,17 @@ export function FlowCanvas({ dragNodeKind, onDragEnd }: FlowCanvasProps) {
       className="flex-1 h-full relative"
       style={{ background: 'var(--canvas-bg)' }}
     >
+      <NodeLegend />
+      <PrecedenceRail />
+
+      {forcedForwardActive && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium shadow-sm max-w-md text-center">
+          <AlertTriangle size={13} className="flex-shrink-0" />
+          Forced Forwarding is ON — every call takes the red path below. Everything else on this
+          canvas is paused (dimmed, tagged "Bypassed"), not deleted.
+        </div>
+      )}
+
       {/* Drop zone hint when dragging */}
       {dragNodeKind && (
         <div className="absolute inset-0 border-4 border-dashed border-blue-400 rounded-none z-20 pointer-events-none flex items-center justify-center">
@@ -97,7 +117,9 @@ export function FlowCanvas({ dragNodeKind, onDragEnd }: FlowCanvasProps) {
         onPaneClick={onPaneClick}
         fitView
         fitViewOptions={{ padding: 0.2 }}
-        deleteKeyCode="Delete"
+        nodesDraggable
+        nodesConnectable={!readOnly}
+        deleteKeyCode={readOnly ? null : 'Delete'}
         multiSelectionKeyCode="Shift"
         selectionMode={SelectionMode.Partial}
         snapToGrid

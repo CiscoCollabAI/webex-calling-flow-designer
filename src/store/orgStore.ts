@@ -9,6 +9,7 @@ import type {
   WebexNumber,
   WebexAutoAttendant,
   WebexHuntGroup,
+  WebexAnnouncement,
 } from '../types/webex';
 
 function isCxQueue(detail: { callPolicies?: { policyType?: string; transferToAgentEnabled?: boolean }; queueSettings?: { wrapUpTimerEnabled?: boolean; postCallSurveyEnabled?: boolean; digitalChannelHandoffEnabled?: boolean } }): boolean {
@@ -41,6 +42,7 @@ interface OrgStore {
   phoneNumbers: WebexNumber[];
   autoAttendants: WebexAutoAttendant[];
   huntGroups: WebexHuntGroup[];
+  announcements: WebexAnnouncement[];
 
   // UI state
   isLoading: boolean;
@@ -69,6 +71,7 @@ const emptyResources = {
   phoneNumbers: [],
   autoAttendants: [],
   huntGroups: [],
+  announcements: [],
 };
 
 export const useOrgStore = create<OrgStore>((set, get) => ({
@@ -114,16 +117,33 @@ export const useOrgStore = create<OrgStore>((set, get) => ({
       // Step 4: load all resources in parallel
       // Each fetch fails gracefully so a single scope gap doesn't break everything.
       // Errors are logged to console so devtools shows exactly which resource failed.
-      const [locations, queues, users, schedules, phoneNumbers, autoAttendants, huntGroups] =
+      const [locations, queues, users, phoneNumbers, autoAttendants, huntGroups, announcements] =
         await Promise.all([
           api.getLocations().catch((e) => { console.error('[Webex] getLocations failed:', e); return [] as WebexLocation[]; }),
           api.getQueues().catch((e) => { console.error('[Webex] getQueues failed:', e); return [] as WebexQueue[]; }),
           api.getUsers().catch((e) => { console.error('[Webex] getUsers failed:', e); return [] as WebexUser[]; }),
-          api.getSchedules().catch((e) => { console.error('[Webex] getSchedules failed:', e); return [] as WebexSchedule[]; }),
           api.getPhoneNumbers().catch((e) => { console.error('[Webex] getPhoneNumbers failed:', e); return [] as WebexNumber[]; }),
           api.getAutoAttendants().catch((e) => { console.error('[Webex] getAutoAttendants failed:', e); return [] as WebexAutoAttendant[]; }),
           api.getHuntGroups().catch((e) => { console.error('[Webex] getHuntGroups failed:', e); return [] as WebexHuntGroup[]; }),
+          // Org-wide (not per-location) — confirmed via Webex's API docs, see
+          // getAnnouncements' own comment in webexApi.ts for why this replaced the
+          // prior 404ing per-location call.
+          api.getAnnouncements().catch((e) => { console.error('[Webex] getAnnouncements failed:', e); return [] as WebexAnnouncement[]; }),
         ]);
+
+      // Schedules are only listable per-location (confirmed via Webex's API docs —
+      // see getSchedules' own comment in webexApi.ts for why this replaced the prior
+      // 404ing org-wide call), so fan out one call per location now that the location
+      // list is available, then flatten. The per-location response doesn't echo back
+      // which location it came from, so locationId/locationName are attached here.
+      const scheduleLists = await Promise.all(
+        locations.map((loc) =>
+          api.getSchedules(loc.id)
+            .then((list) => list.map((s) => ({ ...s, locationId: s.locationId ?? loc.id, locationName: s.locationName ?? loc.name })))
+            .catch((e) => { console.error(`[Webex] getSchedules(${loc.id}) failed:`, e); return [] as WebexSchedule[]; }),
+        ),
+      );
+      const schedules = scheduleLists.flat();
 
       // Persist token in sessionStorage — clears on tab close
       sessionStorage.setItem(SESSION_KEY, token);
@@ -143,6 +163,7 @@ export const useOrgStore = create<OrgStore>((set, get) => ({
         phoneNumbers,
         autoAttendants,
         huntGroups,
+        announcements,
         isLoading: false,
         loadError: null,
         lastSyncedAt: new Date().toISOString(),

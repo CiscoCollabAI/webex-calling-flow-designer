@@ -1,11 +1,29 @@
-import { useState, useRef, useEffect } from 'react';
-import { X, Plus, Trash2, Info, Settings, ChevronDown, Search, Plug } from 'lucide-react';
+import { useState, useRef, useEffect, createContext, useContext } from 'react';
+import { X, Plus, Trash2, Settings, ChevronDown, Search, Plug, Eye } from 'lucide-react';
 import { useFlowStore } from '../store/flowStore';
 import { NODE_DEFINITIONS, type NodeData, type MenuOption, type BusinessHoursSchedule } from '../types';
 import { useOrgData } from '../hooks/useOrgData';
 import { useOrgStore } from '../store/orgStore';
 import { createWebexApi } from '../api/webexApi';
 import type { WebexScheduleEvent } from '../types/webex';
+
+// Set once by PropertiesPanel from the global readOnly switch (flowStore) and read
+// by every shared field primitive below (TextInput, Checkbox, OrgSelect, etc). This
+// lets every existing Fields function (QueueFields, BusinessHoursFields, ...) get
+// the read-only treatment for free, without threading a readOnly prop through ~20
+// call sites — only the shared primitives need to know about it.
+const ReadOnlyContext = createContext(false);
+
+// Plain-text substitute for an input/select when the canvas is read-only — matches
+// the visual language QueueStartFields already used for its "existing queue" summary
+// view (plain value, muted when empty), not a greyed-out disabled control.
+function ReadOnlyValue({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="w-full px-2.5 py-1.5 text-xs text-slate-700 rounded-lg bg-slate-50 border border-slate-100 min-h-[30px] flex items-center">
+      {children}
+    </div>
+  );
+}
 
 // ── Shared option lists ───────────────────────────────────────────────────────
 
@@ -51,12 +69,12 @@ const CQ_ROUTING_POLICY_OPTIONS_ALL = [
 const CQ_SKILL_BASED_POLICY_VALUES = new Set(['CIRCULAR', 'REGULAR', 'UNIFORM']);
 
 export function PropertiesPanel() {
-  const { nodes, selectedNodeId, selectNode, updateNodeData } = useFlowStore();
+  const { nodes, selectedNodeId, selectNode, updateNodeData, readOnly } = useFlowStore();
   const node = nodes.find((n) => n.id === selectedNodeId);
 
   if (!node) {
     return (
-      <div className="w-72 bg-white border-l border-slate-200 flex flex-col items-center justify-center p-8 text-center">
+      <div className="w-72 h-full bg-white border-l border-slate-200 flex flex-col items-center justify-center p-8 text-center">
         <Settings size={32} className="text-slate-200 mb-3" />
         <div className="text-sm font-medium text-slate-400">No node selected</div>
         <div className="text-xs text-slate-300 mt-1">Click a node on the canvas to configure it</div>
@@ -68,7 +86,14 @@ export function PropertiesPanel() {
   const update = (patch: Partial<NodeData>) => updateNodeData(node.id, patch);
 
   return (
-    <div className="w-72 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
+    <ReadOnlyContext.Provider value={readOnly}>
+    <div className="w-72 h-full bg-white border-l border-slate-200 flex flex-col overflow-hidden">
+      {readOnly && (
+        <div className="flex items-center gap-1.5 px-4 py-1.5 bg-amber-50 border-b border-amber-100 text-xs text-amber-700 font-medium">
+          <Eye size={12} className="flex-shrink-0" />
+          Viewing — switch to Editing in the toolbar to change values
+        </div>
+      )}
       {/* Header */}
       <div
         className="flex items-center gap-2.5 px-4 py-3 border-b border-slate-200"
@@ -110,15 +135,8 @@ export function PropertiesPanel() {
         {/* Node-specific fields */}
         <NodeFields data={node.data} update={update} nodeId={node.id} />
       </div>
-
-      {/* Info footer */}
-      {def && (
-        <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-start gap-2">
-          <Info size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-slate-400 leading-relaxed">{def.description}</p>
-        </div>
-      )}
     </div>
+    </ReadOnlyContext.Provider>
   );
 }
 
@@ -355,7 +373,12 @@ function QueueStartFields({ data, update, isNew, isCxe }: {
           {data.cqDnisNumbers && data.cqDnisNumbers.length > 0 && (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
               <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-                <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">DNIS Numbers</span>
+                <span
+                  className="text-xs font-semibold text-slate-600 uppercase tracking-wide"
+                  title="DNIS = Dialed Number Identification Service — which of this queue's phone numbers the caller actually dialed. Lets each number ring or announce differently even though they all reach the same queue."
+                >
+                  DNIS Numbers
+                </span>
               </div>
               <div className="divide-y divide-slate-100">
                 {(data.cqDnisDistinctiveRingingEnabled !== undefined || data.cqDnisDisplayNameAndNumberEnabled !== undefined) && (
@@ -497,6 +520,7 @@ function QueueStartFields({ data, update, isNew, isCxe }: {
 }
 
 function AgentEditor({ data, update, isCxe }: { data: NodeData; update: (p: Partial<NodeData>) => void; isCxe: boolean }) {
+  const readOnly = useContext(ReadOnlyContext);
   const { connected, userOptions } = useOrgData();
   const [adding, setAdding] = useState(false);
   const agents = (data.cqAgents ?? []) as Array<{ name: string; extension?: string; phoneNumber?: string; agentType?: string; skillLevel?: number; joinEnabled?: boolean; weight?: number }>;
@@ -535,7 +559,7 @@ function AgentEditor({ data, update, isCxe }: { data: NodeData; update: (p: Part
         <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Agents</span>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{agents.length}</span>
-          {connected && (
+          {connected && !readOnly && (
             <button
               onClick={() => setAdding(v => !v)}
               className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-medium"
@@ -546,7 +570,7 @@ function AgentEditor({ data, update, isCxe }: { data: NodeData; update: (p: Part
         </div>
       </div>
 
-      {adding && connected && (
+      {adding && connected && !readOnly && (
         <div className="px-3 py-2 border-b border-slate-100">
           <OrgSelect
             value=""
@@ -563,7 +587,9 @@ function AgentEditor({ data, update, isCxe }: { data: NodeData; update: (p: Part
       <div>
         {agents.length === 0 ? (
           <div className="px-3 py-4 text-xs text-slate-400 text-center">
-            No agents assigned.{connected ? ' Click Add to assign agents.' : ' Connect your org to add agents.'}
+            {data.cqAgentsUnavailable
+              ? 'Agent data unavailable for this import — reconnect and re-import to view.'
+              : <>No agents assigned.{connected ? ' Click Add to assign agents.' : ' Connect your org to add agents.'}</>}
           </div>
         ) : (
           <div className="divide-y divide-slate-50 max-h-56 overflow-y-auto">
@@ -583,35 +609,45 @@ function AgentEditor({ data, update, isCxe }: { data: NodeData; update: (p: Part
                 {isCxe && (
                   <div className="flex items-center gap-1 flex-shrink-0" title="Skill level (1–20)">
                     <span className="text-xs text-slate-400">L</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={agent.skillLevel ?? 5}
-                      onChange={(e) => updateSkill(i, Number(e.target.value))}
-                      className="w-9 text-xs text-center border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    />
+                    {readOnly ? (
+                      <span className="w-9 text-xs text-center text-slate-600 font-medium">{agent.skillLevel ?? 5}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={agent.skillLevel ?? 5}
+                        onChange={(e) => updateSkill(i, Number(e.target.value))}
+                        className="w-9 text-xs text-center border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      />
+                    )}
                   </div>
                 )}
                 {showWeight && (
                   <div className="flex items-center gap-1 flex-shrink-0" title="Weight (used for Weighted routing)">
                     <span className="text-xs text-slate-400">W</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={agent.weight ?? 1}
-                      onChange={(e) => updateWeight(i, Number(e.target.value))}
-                      className="w-9 text-xs text-center border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    />
+                    {readOnly ? (
+                      <span className="w-9 text-xs text-center text-slate-600 font-medium">{agent.weight ?? 1}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={1}
+                        value={agent.weight ?? 1}
+                        onChange={(e) => updateWeight(i, Number(e.target.value))}
+                        className="w-9 text-xs text-center border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      />
+                    )}
                   </div>
                 )}
-                <button
-                  onClick={() => removeAgent(i)}
-                  className="text-slate-300 hover:text-red-500 flex-shrink-0 transition-colors"
-                  title="Remove agent"
-                >
-                  <Trash2 size={11} />
-                </button>
+                {!readOnly && (
+                  <button
+                    onClick={() => removeAgent(i)}
+                    className="text-slate-300 hover:text-red-500 flex-shrink-0 transition-colors"
+                    title="Remove agent"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -843,6 +879,7 @@ function StartFields({ data, update }: FieldProps) {
 }
 
 function MenuFields({ data, update }: FieldProps) {
+  const readOnly = useContext(ReadOnlyContext);
   const options = data.menuOptions || [];
   // Derive prompt type: explicit field wins, fall back to 'audio' if a file is already set
   const promptType = data.menuPromptType || (data.menuGreetingFile ? 'audio' : 'tts');
@@ -914,12 +951,14 @@ function MenuFields({ data, update }: FieldProps) {
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Menu Options</label>
-          <button
-            onClick={addOption}
-            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
-          >
-            <Plus size={12} /> Add
-          </button>
+          {!readOnly && (
+            <button
+              onClick={addOption}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+            >
+              <Plus size={12} /> Add
+            </button>
+          )}
         </div>
         <div className="space-y-2">
           {options.map((opt, i) => {
@@ -932,30 +971,40 @@ function MenuFields({ data, update }: FieldProps) {
                   <div className="w-7 h-7 rounded bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
                     {opt.digit}
                   </div>
-                  <input
-                    value={opt.digit}
-                    onChange={(e) => updateOption(i, { digit: e.target.value })}
-                    className="w-10 text-xs font-mono text-center border border-slate-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    maxLength={1}
-                    placeholder="0-9"
-                  />
-                  <input
-                    value={opt.label}
-                    onChange={(e) => updateOption(i, { label: e.target.value })}
-                    className="flex-1 text-xs border border-slate-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    placeholder="Option label"
-                  />
-                  <button onClick={() => removeOption(i)} className="text-red-400 hover:text-red-600 flex-shrink-0">
-                    <Trash2 size={12} />
-                  </button>
+                  {readOnly ? (
+                    <span className="flex-1 text-xs text-slate-700 font-medium">{opt.label}</span>
+                  ) : (
+                    <>
+                      <input
+                        value={opt.digit}
+                        onChange={(e) => updateOption(i, { digit: e.target.value })}
+                        className="w-10 text-xs font-mono text-center border border-slate-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        maxLength={1}
+                        placeholder="0-9"
+                      />
+                      <input
+                        value={opt.label}
+                        onChange={(e) => updateOption(i, { label: e.target.value })}
+                        className="flex-1 text-xs border border-slate-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        placeholder="Option label"
+                      />
+                      <button onClick={() => removeOption(i)} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                        <Trash2 size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 pl-9">
-                  <input
-                    value={opt.description || ''}
-                    onChange={(e) => updateOption(i, { description: e.target.value })}
-                    className="flex-1 text-xs border border-slate-200 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 text-slate-600"
-                    placeholder="Description (optional)"
-                  />
+                  {readOnly ? (
+                    opt.description && <span className="flex-1 text-xs text-slate-500">{opt.description}</span>
+                  ) : (
+                    <input
+                      value={opt.description || ''}
+                      onChange={(e) => updateOption(i, { description: e.target.value })}
+                      className="flex-1 text-xs border border-slate-200 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 text-slate-600"
+                      placeholder="Description (optional)"
+                    />
+                  )}
                   {actionLabel && (
                     <span
                       className="flex-shrink-0 text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5"
@@ -986,26 +1035,10 @@ function MenuFields({ data, update }: FieldProps) {
 // When not connected: just the free-text input.
 
 function AnnouncementPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { connected } = useOrgData();
-  const token = useOrgStore((s) => s.token);
-  const locationId = useFlowStore((s) => s.flowMeta.locationId);
-
-  const [options, setOptions] = useState<Array<{ value: string; label: string; meta?: string }>>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!connected || !token || !locationId) return;
-    let cancelled = false;
-    setLoading(true);
-    createWebexApi(token)
-      .getAnnouncements(locationId)
-      .then((items) => {
-        if (!cancelled) setOptions(items.map((a) => ({ value: a.name, label: a.name, meta: a.mediaFileType ?? 'audio' })));
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [connected, token, locationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Announcements are org-wide and already loaded once at connect time (orgStore) —
+  // no per-node fetch needed. Previously fetched per-location here, which 404'd
+  // (announcements aren't location-scoped in the path) and always showed empty.
+  const { connected, announcementOptions } = useOrgData();
 
   if (!connected) {
     return <TextInput value={value} onChange={onChange} placeholder="greeting.wav" />;
@@ -1016,11 +1049,11 @@ function AnnouncementPicker({ value, onChange }: { value: string; onChange: (v: 
       <OrgSelect
         value={value}
         displayValue={value}
-        options={options}
+        options={announcementOptions}
         onSelect={(val) => onChange(val)}
-        placeholder={loading ? 'Loading announcements…' : 'Select from org announcements…'}
+        placeholder="Select from org announcements…"
         offlinePlaceholder="greeting.wav"
-        connected={!loading}
+        connected={connected}
       />
       <TextInput value={value} onChange={onChange} placeholder="or type filename, e.g. welcome.wav" />
     </div>
@@ -1101,7 +1134,33 @@ function CollectDigitsFields({ data, update }: FieldProps) {
   );
 }
 
+// Auto-generated plain-English read of the Bounced Calls settings — turns four
+// independent toggles into the one sentence a Level 1 viewer actually needs
+// ("what happens to a call that's stuck with an agent?"), shown in View mode.
+function bouncedCallsNarration(data: NodeData): string {
+  const sentences: string[] = [];
+  if (data.callBounceEnabled) {
+    let s = `An agent's phone rings ${data.callBounceMaxRings ?? 3} times — if unanswered, the call goes back to the queue.`;
+    if (data.callBounceOnAgentUnavailableEnabled) {
+      s += ' It also bounces back right away if the agent becomes unreachable.';
+    }
+    sentences.push(s);
+  }
+  if (data.callBounceOnHoldEnabled) {
+    sentences.push(`If a call sits with an agent for over ${data.callBounceOnHoldMaxSeconds ?? 60} seconds, it bounces back to the queue.`);
+  }
+  if (data.callBounceAlertAgentEnabled) {
+    sentences.push(`The agent gets an alert after ${data.callBounceAlertAgentMaxSeconds ?? 60} seconds if a call is on hold too long.`);
+  }
+  if (sentences.length === 0) {
+    return 'Bounced-call handling is turned off — unanswered or held calls stay with the agent.';
+  }
+  return sentences.join(' ');
+}
+
 function QueueFields({ data, update }: FieldProps) {
+  const readOnly = useContext(ReadOnlyContext);
+  const [showBounceDetails, setShowBounceDetails] = useState(false);
   const { connected, queueOptions } = useOrgData();
   return (
     <FieldCard title="Queue Settings">
@@ -1142,7 +1201,8 @@ function QueueFields({ data, update }: FieldProps) {
         <Checkbox label="Enable Call Timeout Handling" checked={data.callTimeoutHandlingEnabled ?? false} onChange={(v) => update({ callTimeoutHandlingEnabled: v })} />
         {data.callTimeoutHandlingSourceUnknown && (
           <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
-            Not available via API — configure manually if used.
+            Webex doesn't expose whether this is actually on or off — the checkbox above is a default,
+            not a confirmed value. Check Control Hub directly to see the real setting, or toggle it here if you know it should be enabled.
           </div>
         )}
         <Checkbox label="Comfort Message" checked={data.comfortMessageEnabled ?? false} onChange={(v) => update({ comfortMessageEnabled: v })} />
@@ -1165,38 +1225,56 @@ function QueueFields({ data, update }: FieldProps) {
       </FieldGroup>
 
       <FieldGroup label="Bounced Calls">
-        <Checkbox label="Bounce Unanswered Calls" checked={data.callBounceEnabled ?? false} onChange={(v) => update({ callBounceEnabled: v })} />
-        {data.callBounceEnabled && (
+        {readOnly && (
           <>
-            <Field label="Rings Before Bounce">
-              <NumberInput value={data.callBounceMaxRings ?? 3} onChange={(v) => update({ callBounceMaxRings: v })} min={1} max={20} />
-            </Field>
-            <Checkbox
-              label="Also Bounce if Agent Becomes Unavailable"
-              checked={data.callBounceOnAgentUnavailableEnabled ?? false}
-              onChange={(v) => update({ callBounceOnAgentUnavailableEnabled: v })}
-            />
+            <div className="rounded-lg bg-gradient-to-br from-sky-50 to-cyan-50 border border-sky-200 px-3 py-2.5 text-xs text-sky-800 leading-relaxed">
+              {bouncedCallsNarration(data)}
+            </div>
+            <button
+              onClick={() => setShowBounceDetails((v) => !v)}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-medium"
+            >
+              <ChevronDown size={11} className={`transition-transform ${showBounceDetails ? 'rotate-180' : ''}`} />
+              {showBounceDetails ? 'Hide individual settings' : 'Show individual settings'}
+            </button>
           </>
         )}
-        <Checkbox
-          label="Alert Agent on Long Call"
-          checked={data.callBounceAlertAgentEnabled ?? false}
-          onChange={(v) => update({ callBounceAlertAgentEnabled: v })}
-        />
-        {data.callBounceAlertAgentEnabled && (
-          <Field label="Alert After (s)">
-            <NumberInput value={data.callBounceAlertAgentMaxSeconds ?? 60} onChange={(v) => update({ callBounceAlertAgentMaxSeconds: v })} min={10} max={600} />
-          </Field>
-        )}
-        <Checkbox
-          label="Bounce Calls Left on Hold Too Long"
-          checked={data.callBounceOnHoldEnabled ?? false}
-          onChange={(v) => update({ callBounceOnHoldEnabled: v })}
-        />
-        {data.callBounceOnHoldEnabled && (
-          <Field label="Hold Timeout (s)">
-            <NumberInput value={data.callBounceOnHoldMaxSeconds ?? 60} onChange={(v) => update({ callBounceOnHoldMaxSeconds: v })} min={10} max={600} />
-          </Field>
+        {(!readOnly || showBounceDetails) && (
+          <>
+            <Checkbox label="Bounce Unanswered Calls" checked={data.callBounceEnabled ?? false} onChange={(v) => update({ callBounceEnabled: v })} />
+            {data.callBounceEnabled && (
+              <>
+                <Field label="Rings Before Bounce">
+                  <NumberInput value={data.callBounceMaxRings ?? 3} onChange={(v) => update({ callBounceMaxRings: v })} min={1} max={20} />
+                </Field>
+                <Checkbox
+                  label="Also Bounce if Agent Becomes Unavailable"
+                  checked={data.callBounceOnAgentUnavailableEnabled ?? false}
+                  onChange={(v) => update({ callBounceOnAgentUnavailableEnabled: v })}
+                />
+              </>
+            )}
+            <Checkbox
+              label="Alert Agent on Long Call"
+              checked={data.callBounceAlertAgentEnabled ?? false}
+              onChange={(v) => update({ callBounceAlertAgentEnabled: v })}
+            />
+            {data.callBounceAlertAgentEnabled && (
+              <Field label="Alert After (s)">
+                <NumberInput value={data.callBounceAlertAgentMaxSeconds ?? 60} onChange={(v) => update({ callBounceAlertAgentMaxSeconds: v })} min={10} max={600} />
+              </Field>
+            )}
+            <Checkbox
+              label="Bounce Calls Left on Hold Too Long"
+              checked={data.callBounceOnHoldEnabled ?? false}
+              onChange={(v) => update({ callBounceOnHoldEnabled: v })}
+            />
+            {data.callBounceOnHoldEnabled && (
+              <Field label="Hold Timeout (s)">
+                <NumberInput value={data.callBounceOnHoldMaxSeconds ?? 60} onChange={(v) => update({ callBounceOnHoldMaxSeconds: v })} min={10} max={600} />
+              </Field>
+            )}
+          </>
         )}
       </FieldGroup>
 
@@ -1219,8 +1297,9 @@ function QueueFields({ data, update }: FieldProps) {
             </>
           ) : data.priorityEscalationSourceUnknown ? (
             <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
-              <span className="font-medium text-slate-600">Priority Escalation</span> — not available via API;
-              configure manually if used (add a "Priority Escalation" transfer node to the canvas).
+              <span className="font-medium text-slate-600">Priority Escalation</span> — Webex doesn't expose whether
+              this is on or off via the API, so it isn't shown here. Check Control Hub directly, or add a
+              "Priority Escalation" transfer node to the canvas if you know it should be configured.
             </div>
           ) : null}
           {data.digitalHandoffEnabled && (
@@ -1264,8 +1343,11 @@ function DnisEntryRow({ entry }: { entry: NonNullable<NodeData['cqDnisNumbers']>
           {enabledMessages.map((s, j) => (
             <div key={j} className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs">
               <span className="text-slate-500 flex-shrink-0">{s.label}</span>
-              <span className="text-slate-700 font-mono truncate text-right">
-                {[s.fileName || s.greeting, s.extra].filter(Boolean).join(' · ')}
+              <span className="text-right truncate">
+                {s.fileLabel && <div className="text-slate-700 font-medium truncate">{s.fileLabel}</div>}
+                <div className={`font-mono truncate ${s.fileLabel ? 'text-slate-400' : 'text-slate-700'}`}>
+                  {[s.fileName || s.greeting, s.extra].filter(Boolean).join(' · ')}
+                </div>
               </span>
             </div>
           ))}
@@ -1305,6 +1387,7 @@ function AgentDirectFields({ data, update }: FieldProps) {
 }
 
 function BusinessHoursFields({ data, update }: FieldProps) {
+  const readOnly = useContext(ReadOnlyContext);
   const hours = data.businessHours || [];
   const { connected, businessHoursOptions, holidayOptions } = useOrgData();
   const schedules = useOrgStore((s) => s.schedules);
@@ -1362,28 +1445,38 @@ function BusinessHoursFields({ data, update }: FieldProps) {
           <div className="space-y-1.5">
             {hours.map((h, i) => (
               <div key={h.day} className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={h.open}
-                  onChange={(e) => updateDay(i, { open: e.target.checked })}
-                  className="rounded accent-blue-500 w-3.5 h-3.5 flex-shrink-0"
-                />
+                {readOnly ? (
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${h.open ? 'bg-green-500' : 'bg-slate-300'}`} />
+                ) : (
+                  <input
+                    type="checkbox"
+                    checked={h.open}
+                    onChange={(e) => updateDay(i, { open: e.target.checked })}
+                    className="rounded accent-blue-500 w-3.5 h-3.5 flex-shrink-0"
+                  />
+                )}
                 <span className="w-8 text-slate-600 font-medium flex-shrink-0">{h.day.slice(0, 3)}</span>
-                <input
-                  type="time"
-                  value={h.start}
-                  disabled={!h.open}
-                  onChange={(e) => updateDay(i, { start: e.target.value })}
-                  className="border border-slate-200 rounded px-1 py-0.5 text-xs w-20 disabled:opacity-40 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <span className="text-slate-400">–</span>
-                <input
-                  type="time"
-                  value={h.end}
-                  disabled={!h.open}
-                  onChange={(e) => updateDay(i, { end: e.target.value })}
-                  className="border border-slate-200 rounded px-1 py-0.5 text-xs w-20 disabled:opacity-40 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
+                {readOnly ? (
+                  <span className="text-slate-600">{h.open ? `${h.start} – ${h.end}` : 'Closed'}</span>
+                ) : (
+                  <>
+                    <input
+                      type="time"
+                      value={h.start}
+                      disabled={!h.open}
+                      onChange={(e) => updateDay(i, { start: e.target.value })}
+                      className="border border-slate-200 rounded px-1 py-0.5 text-xs w-20 disabled:opacity-40 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                    <span className="text-slate-400">–</span>
+                    <input
+                      type="time"
+                      value={h.end}
+                      disabled={!h.open}
+                      onChange={(e) => updateDay(i, { end: e.target.value })}
+                      className="border border-slate-200 rounded px-1 py-0.5 text-xs w-20 disabled:opacity-40 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -1481,8 +1574,16 @@ function ScheduleDetailView({
               <tbody>
                 {events.map((ev, i) => {
                   const isAlt = i % 2 === 1;
-                  const day = ev.recurrence?.recurWeekly?.scheduleDay
-                    ? capitalize(ev.recurrence.recurWeekly.scheduleDay)
+                  const week = ev.recurrence?.recurWeekly;
+                  const flaggedDays = week
+                    ? (['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const)
+                        .filter((d) => week[d])
+                        .map((d) => capitalize(d))
+                    : [];
+                  const day = flaggedDays.length > 0
+                    ? flaggedDays.join(', ')
+                    : week?.scheduleDay
+                    ? capitalize(week.scheduleDay)
                     : ev.name ?? '—';
                   const hours = ev.allDayEnabled
                     ? 'All day'
@@ -1836,6 +1937,9 @@ function TextInput({
 }: {
   value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number;
 }) {
+  if (useContext(ReadOnlyContext)) {
+    return <ReadOnlyValue>{value || <span className="text-slate-300 italic">{placeholder || '—'}</span>}</ReadOnlyValue>;
+  }
   return (
     <input
       type="text"
@@ -1853,6 +1957,13 @@ function TextArea({
 }: {
   value: string; onChange: (v: string) => void; placeholder?: string; rows?: number; mono?: boolean;
 }) {
+  if (useContext(ReadOnlyContext)) {
+    return (
+      <div className={`w-full px-2.5 py-1.5 text-xs text-slate-700 rounded-lg bg-slate-50 border border-slate-100 whitespace-pre-wrap ${mono ? 'font-mono' : ''}`}>
+        {value || <span className="text-slate-300 italic">{placeholder || '—'}</span>}
+      </div>
+    );
+  }
   return (
     <textarea
       value={value}
@@ -1869,6 +1980,9 @@ function NumberInput({
 }: {
   value: number; onChange: (v: number) => void; min?: number; max?: number;
 }) {
+  if (useContext(ReadOnlyContext)) {
+    return <ReadOnlyValue>{value}</ReadOnlyValue>;
+  }
   return (
     <input
       type="number"
@@ -1888,6 +2002,9 @@ function SelectInput({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
+  if (useContext(ReadOnlyContext)) {
+    return <ReadOnlyValue>{options.find((o) => o.value === value)?.label ?? value}</ReadOnlyValue>;
+  }
   return (
     <select
       value={value}
@@ -1908,6 +2025,9 @@ function ToggleGroup({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
+  if (useContext(ReadOnlyContext)) {
+    return <ReadOnlyValue>{options.find((o) => o.value === value)?.label ?? value}</ReadOnlyValue>;
+  }
   return (
     <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-slate-50">
       {options.map((o) => (
@@ -1928,6 +2048,9 @@ function ToggleGroup({
 }
 
 function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  if (useContext(ReadOnlyContext)) {
+    return <StatusDot enabled={checked} onLabel={label} offLabel={label} />;
+  }
   return (
     <label className="flex items-center gap-2.5 cursor-pointer group">
       <div
@@ -1971,6 +2094,7 @@ interface OrgSelectProps {
 function OrgSelect({
   value, displayValue, options, onSelect, placeholder, offlinePlaceholder, connected,
 }: OrgSelectProps) {
+  const readOnly = useContext(ReadOnlyContext);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1996,6 +2120,10 @@ function OrgSelect({
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  if (readOnly) {
+    return <ReadOnlyValue>{selectedLabel || <span className="text-slate-300 italic">{placeholder}</span>}</ReadOnlyValue>;
+  }
 
   // Offline fallback
   if (!connected) {
