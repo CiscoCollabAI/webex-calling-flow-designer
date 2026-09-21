@@ -181,11 +181,15 @@ export function exportCallQueue(
       } else if (t.data.kind === 'playMessage') {
         strandedCallsBody = { action: 'ANNOUNCEMENT' };
       } else if (t.data.kind === 'end') {
-        const label = t.data.label || '';
+        // Lower-cased substring match — tolerant of both the current plain-language
+        // labels ("Plays a busy tone...") and older exports/drafts saved with the
+        // previous technical labels ("No Agents: Busy Treatment"), so relabeling
+        // the display text doesn't silently break round-tripping this enum.
+        const label = (t.data.label || '').toLowerCase();
         strandedCallsBody = {
-          action: label.includes('Busy') ? 'BUSY'
-            : label.includes('Ring') ? 'RINGING'
-            : label.includes('Night Service') ? 'NIGHT_SERVICE'
+          action: label.includes('busy') ? 'BUSY'
+            : label.includes('ring') ? 'RINGING'
+            : label.includes('night service') ? 'NIGHT_SERVICE'
             : 'NONE',
         };
       } else {

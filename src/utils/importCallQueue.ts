@@ -6,7 +6,7 @@
  *   Row 1  — Night Service gate  (BusinessHours, if nightService.nightServiceEnabled)
  *             OR Holiday-only gate (if holidayService.holidayServiceEnabled and no night service)
  *   Row +1 — Intro Announcement (PlayMessage, if queueSettings.welcomeMessage.enabled)
- *   Row +1 — Skills Router (Branch, if callPolicies.routingType === 'SKILL_BASED')
+ *   Row +1 — Call Router (Branch, always — shows routing type + pattern for every queue)
  *   Queue row — [Night Service Action]  [Queue Node]  [Holiday Action]
  *               [MOH dashed node, far-left] [Comfort Msg dashed node, far-left]
  *   Action row — [Overflow → End]  [Wrap-Up? → Survey? → Answered End]  [Stranded]
@@ -24,8 +24,11 @@ import type {
   WebexQueueDnisAnnouncements,
   WebexQueueCallForwarding,
   WebexQueueDnisSettings,
+  WebexSchedule,
+  WebexScheduleDetail,
 } from '../types/webex';
 import type { NodeData } from '../types';
+import { scheduleEventsToBusinessHours } from './businessHoursSummary';
 
 const CENTER_X   = 420;
 const COL_GAP    = 300;
@@ -61,15 +64,48 @@ function mkEdge(
   };
 }
 
+// Queue policy responses only give each audio file's system-generated fileName
+// (e.g. "1752096982842.wav" — confirmed via real API capture), not the human-
+// readable name an admin assigned on upload. The org's announcement library
+// (fetched separately, keyed by id -> name) has the real name — resolve by
+// matching the file's id against it, falling back to the raw fileName if the
+// id isn't found there (e.g. announcements fetch failed, or a stale/deleted file).
+// Returns both the raw system filename (always shown, unchanged from before) and,
+// separately, the resolved friendly label when one is actually available from
+// either announcement source — never invents one, and never replaces the filename.
+function resolveAudioFileName(
+  files: { id?: string; fileName?: string }[] | undefined,
+  announcementNames?: Map<string, string>,
+): { fileName: string; label?: string } {
+  const first = files?.[0];
+  if (!first) return { fileName: '' };
+  const label = first.id ? announcementNames?.get(first.id) : undefined;
+  if (!label && first.id && announcementNames && announcementNames.size > 0) {
+    console.warn(`[Webex] Audio file id "${first.id}" (fileName "${first.fileName}") has no matching label among ${announcementNames.size} announcement(s) — showing filename only.`);
+  }
+  return { fileName: first.fileName ?? '', label };
+}
+
+// Spreadable NodeData-shaped wrapper around resolveAudioFileName, so each node's
+// data object can just do `...audioFields(...)` alongside its other fields.
+function audioFields(
+  files: { id?: string; fileName?: string }[] | undefined,
+  announcementNames?: Map<string, string>,
+): { audioFile: string; audioFileLabel?: string } {
+  const { fileName, label } = resolveAudioFileName(files, announcementNames);
+  return { audioFile: fileName, audioFileLabel: label };
+}
+
 // Reduces the large DNIS-per-entry announcement schema down to one summary line per
 // message type, matching how every other complex nested object in this app is shown
 // (compact read-only display, not a full editable sub-form).
-function summarizeDnisAnnouncements(ann?: WebexQueueDnisAnnouncements) {
+function summarizeDnisAnnouncements(ann?: WebexQueueDnisAnnouncements, announcementNames?: Map<string, string>) {
   if (!ann) return [];
-  const rows: { label: string; enabled: boolean; greeting?: string; fileName?: string; extra?: string }[] = [];
-  const push = (label: string, m?: { enabled?: boolean; greeting?: string; audioAnnouncementFiles?: { fileName?: string }[] }, extra?: string) => {
+  const rows: { label: string; enabled: boolean; greeting?: string; fileName?: string; fileLabel?: string; extra?: string }[] = [];
+  const push = (label: string, m?: { enabled?: boolean; greeting?: string; audioAnnouncementFiles?: { id?: string; fileName?: string }[] }, extra?: string) => {
     if (!m) return;
-    rows.push({ label, enabled: !!m.enabled, greeting: m.greeting, fileName: m.audioAnnouncementFiles?.[0]?.fileName, extra });
+    const resolved = resolveAudioFileName(m.audioAnnouncementFiles, announcementNames);
+    rows.push({ label, enabled: !!m.enabled, greeting: m.greeting, fileName: resolved.fileName, fileLabel: resolved.label, extra });
   };
   push('Welcome', ann.welcomeMessage);
   push('Comfort', ann.comfortMessage);
@@ -88,6 +124,26 @@ function summarizeDnisAnnouncements(ann?: WebexQueueDnisAnnouncements) {
   return rows;
 }
 
+// Small local labels for the Call Router node's subtitle — kept here rather than
+// imported from PropertiesPanel.tsx to avoid a data-layer -> UI-layer dependency;
+// PropertiesPanel.tsx has its own copy for editing, this one is just for display.
+const ROUTING_TYPE_LABELS: Record<string, string> = {
+  PRIORITY_BASED: 'Priority-Based',
+  SKILL_BASED: 'Skill-Based',
+};
+const ROUTING_PATTERN_LABELS: Record<string, string> = {
+  CIRCULAR: 'Circular',
+  REGULAR: 'Top Down',
+  UNIFORM: 'Longest Idle',
+  WEIGHTED: 'Weighted',
+  SIMULTANEOUS: 'Simultaneous',
+};
+function describeRouting(routingType: string, routingPolicy: string): string {
+  const type = ROUTING_TYPE_LABELS[routingType] ?? routingType;
+  const pattern = ROUTING_PATTERN_LABELS[routingPolicy] ?? routingPolicy;
+  return [type, pattern].filter(Boolean).join(' · ');
+}
+
 export interface CQImportInput {
   detail: WebexQueueDetail;
   nightService?: WebexQueueNightService;
@@ -98,11 +154,21 @@ export interface CQImportInput {
   dnisAnnouncements?: Record<string, WebexQueueDnisAnnouncements | undefined>;
   callForwarding?: WebexQueueCallForwarding;
   dnisSettings?: WebexQueueDnisSettings;
+  // Org-wide schedule list — used to resolve Night Service's businessHoursName (a
+  // flat name string; the Night Service API response has no schedule id) to a real
+  // Webex schedule id, the same way importAutoAttendant resolves AA schedule names.
+  schedules?: WebexSchedule[];
+  // Pre-fetched hours for the resolved Business Hours schedule above, so the gate
+  // node can show actual hours on canvas instead of requiring a manual API call.
+  businessHoursScheduleDetail?: WebexScheduleDetail;
+  // Org announcement library (id -> human-readable name), used to resolve audio
+  // file names — see resolveAudioFileName above for why this is needed.
+  announcementNames?: Map<string, string>;
 }
 
 export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]; edges: Edge[] } {
   _seq = 0;
-  const { detail, nightService, holidayService, strandedCalls, forcedForward, dnis, dnisAnnouncements, callForwarding, dnisSettings } = input;
+  const { detail, nightService, holidayService, strandedCalls, forcedForward, dnis, dnisAnnouncements, callForwarding, dnisSettings, schedules, businessHoursScheduleDetail, announcementNames } = input;
 
   const nodes: Node<NodeData>[] = [];
   const edges: Edge[] = [];
@@ -110,8 +176,16 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
   // ── Feature flags ─────────────────────────────────────────────────────────
   const hasForcedForward = !!forcedForward?.forcedForwardEnabled;
   const hasNightService = !!nightService?.nightServiceEnabled;
-  const nsHasHoliday    = hasNightService && !!nightService?.holidayScheduleId;
-  const hasHolidayOnly  = !hasNightService && !!holidayService?.holidayServiceEnabled;
+  // Whether a Holiday action node will be wired to the gate at all — this is the
+  // standalone Holiday Service feature, independent of whether Night Service also
+  // references its own holidayScheduleId (a separate, unrelated field). This flag
+  // is the single source of truth for both the gate's rendered output-handle count
+  // (AllNodes.tsx) and which handle the Holiday edge attaches to, below — they used
+  // to be decided by two different conditions, which could point a "Closed" edge
+  // and a "Holiday" edge at the same handle when Night Service had no schedule of
+  // its own.
+  const hasHolidayAction = !!holidayService?.holidayServiceEnabled;
+  const hasHolidayOnly  = !hasNightService && hasHolidayAction;
 
   const qs = detail.queueSettings;
   const cf = callForwarding?.callForwarding;
@@ -119,7 +193,6 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
   const hasIntroMsg       = !!(qs?.welcomeMessage?.enabled);
   const hasComfortMsg     = !!(qs?.comfortMessage?.enabled);
   const hasCustomMoh      = qs?.mohMessage?.normalSource?.greeting === 'CUSTOM';
-  const hasSkillsRouting  = detail.callPolicies?.routingType === 'SKILL_BASED';
   const hasPriorityEsc    = !!(detail.callPolicies?.transferToAgentEnabled);
   const hasWrapUp         = !!(qs?.wrapUpTimerEnabled);
   const hasPostCallSurvey = !!(qs?.postCallSurveyEnabled);
@@ -162,6 +235,11 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       cqPhoneNumberForOutgoingCallsEnabled: detail.phoneNumberForOutgoingCallsEnabled ?? false,
       cqAllowCallWaitingForAgentsEnabled: detail.allowCallWaitingForAgentsEnabled ?? false,
       cqDigitalInboxEnabled: detail.digitalInboxEnabled ?? false,
+      // detail.agents === undefined means the API response omitted this field
+      // (data unavailable for this import); [] means it was returned and confirmed
+      // empty. Both would otherwise collapse to the same empty array below, so the
+      // distinction is captured here before that happens.
+      cqAgentsUnavailable: detail.agents === undefined,
       cqAgents: (detail.agents ?? []).map(a => ({
         name:        [a.firstName, a.lastName].filter(Boolean).join(' ') || a.userName || '',
         extension:   a.extension  ?? '',
@@ -201,8 +279,12 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         extension: d.extension,
         ringPattern: d.ringPattern,
         customAnnouncementEnabled: d.customDnisAnnouncementSettingsEnabled,
-        announcementSummary: d.id ? summarizeDnisAnnouncements(dnisAnnouncements?.[d.id]) : [],
+        announcementSummary: d.id ? summarizeDnisAnnouncements(dnisAnnouncements?.[d.id], announcementNames) : [],
       })),
+      cqHasHolidayService: hasHolidayAction,
+      cqHasNightService: hasNightService,
+      cqHasForcedForward: hasForcedForward,
+      cqHasStrandedPolicy: !!strandedCalls?.action && strandedCalls.action !== 'NONE',
     } as NodeData,
   });
   row++;
@@ -224,7 +306,8 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
           kind: 'playMessage',
           label: 'Forced Forward Announcement',
           messageType: forcedForward!.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-          audioFile: forcedForward!.audioFiles?.[0]?.fileName ?? '',
+          ...audioFields(forcedForward!.audioFiles, announcementNames),
+          cqAnnouncementSource: true,
         } as NodeData,
       });
       edges.push(mkEdge(`e-${startId}-ff-ann`, startId, ffAnnId, { label: 'Forced Forward', color: '#dc2626' }));
@@ -255,22 +338,34 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
   if (hasNightService) {
     gateId = uid('cq-ns-gate');
     const ns0 = nightService!;
+    // businessHoursName/-Level are flat fields on the real API response — no
+    // scheduleId is returned there, so resolve it by name against the org's
+    // schedule list (same approach importAutoAttendant uses for AA schedules).
+    const bhSchedule = schedules?.find(
+      (s) => s.type === 'businessHours' && s.name === ns0.businessHoursName,
+    );
     nodes.push({
       id: gateId,
       type: 'businessHours',
       position: { x: CENTER_X, y: BASE_Y + row * ROW_GAP },
       data: {
         kind: 'businessHours',
-        label: 'Night Service',
-        // businessHoursName/-Level are flat fields on the real API response — no
-        // scheduleId is returned, so this can't be matched to an org schedule by id.
+        // Primary label is the action ("Business Hours"), matching the def.label
+        // used elsewhere — this also suppresses BaseNode's normally-shown secondary
+        // subtitle (only rendered when data.label !== def.label), since "Night
+        // Service" already lives correctly on the downstream action node's own
+        // label ("Night Service: Transfer") and repeating it here was redundant.
+        label: 'Business Hours',
         scheduleName:      ns0.businessHoursName ?? '',
-        scheduleId:        '',
+        scheduleId:        bhSchedule?.id ?? '',
         scheduleLevel:     ns0.businessHoursLevel,
+        businessHours:     scheduleEventsToBusinessHours(businessHoursScheduleDetail?.events),
         holidaySchedule:   ns0.holidayScheduleName ?? '',
         holidayScheduleId: ns0.holidayScheduleId  ?? '',
         holidayScheduleLevel: ns0.holidayScheduleLevel,
         timezone:          detail.timeZone ?? '',
+        hasHolidayBranch:  hasHolidayAction,
+        gateMode:          'nightService',
       } as NodeData,
     });
     edges.push(mkEdge(`e-${startId}-${gateId}`, startId, gateId));
@@ -290,13 +385,14 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         holidayScheduleId: holidayService!.holidayScheduleId  ?? '',
         holidayScheduleLevel: holidayService!.holidayScheduleLevel,
         timezone:          detail.timeZone ?? '',
+        gateMode:          'holidayOnly',
       } as NodeData,
     });
     edges.push(mkEdge(`e-${startId}-${gateId}`, startId, gateId));
     row++;
   }
 
-  // ── Pre-queue chain: Intro Announcement → Skills Router ───────────────────
+  // ── Pre-queue chain: Intro Announcement → Call Router ─────────────────────
   // Track the "last" node before the Queue for edge connections.
   let preId: string              = gateId ?? startId;
   let preHandle: string | undefined = gateId ? 'output-0' : undefined;
@@ -311,8 +407,15 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       position: { x: CENTER_X, y: BASE_Y + row * ROW_GAP },
       data: {
         kind: 'playMessage',
-        label: 'Intro Announcement',
+        label: 'Announcement',
+        nodeSubtitle: 'Welcome Greeting',
         messageType: qs?.welcomeMessage?.greeting === 'CUSTOM' ? 'audio' : 'tts',
+        // Welcome/Comfort messages use a different field name (audioAnnouncementFiles)
+        // than Night Service/Holiday/Forced Forward/Stranded (audioFiles) — this was
+        // previously never read at all for this node, leaving Audio File blank even
+        // when messageType was 'audio'.
+        ...audioFields(qs?.welcomeMessage?.audioAnnouncementFiles, announcementNames),
+        cqAnnouncementSource: true,
       } as NodeData,
     });
     edges.push(mkEdge(`e-${preId}-intro`, preId, introId, {
@@ -322,24 +425,30 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
     row++;
   }
 
-  if (hasSkillsRouting) {
-    const skillsId = uid('cq-skills');
+  // Always shown — routing pattern applies to every queue (Priority-Based routing
+  // has no other visible representation on canvas at all today; it otherwise only
+  // lives in the Start node's properties panel).
+  {
+    const routingType = detail.callPolicies?.routingType ?? '';
+    const routingPolicy = detail.callPolicies?.policy ?? '';
+    const routerId = uid('cq-router');
     nodes.push({
-      id: skillsId,
+      id: routerId,
       type: 'branch',
       position: { x: CENTER_X, y: BASE_Y + row * ROW_GAP },
       data: {
         kind: 'branch',
-        label: 'Skills Router',
+        label: 'Call Router',
+        nodeSubtitle: describeRouting(routingType, routingPolicy),
         variable: 'skill',
         operator: 'equals',
-        compareValue: 'SKILL_BASED',
+        compareValue: routingType,
       } as NodeData,
     });
-    edges.push(mkEdge(`e-${preId}-skills`, preId, skillsId, {
+    edges.push(mkEdge(`e-${preId}-router`, preId, routerId, {
       handle: preHandle, label: preLabel, color: preColor,
     }));
-    preId = skillsId; preHandle = 'output-0'; preLabel = undefined; preColor = undefined;
+    preId = routerId; preHandle = 'output-0'; preLabel = undefined; preColor = undefined;
     row++;
   }
 
@@ -421,7 +530,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
 
     let nsSourceId     = gateId;
     let nsSourceHandle: string | undefined = 'output-1';
-    let nsSourceLabel:  string | undefined = 'Closed';
+    let nsSourceLabel:  string | undefined = 'Outside Business Hours';
     let nsSourceColor:  string | undefined = '#f97316';
 
     if (ns.playAnnouncementBeforeEnabled) {
@@ -432,9 +541,11 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         position: { x: CENTER_X - COL_GAP, y: queueRowY - ROW_GAP / 2 },
         data: {
           kind: 'playMessage',
-          label: 'Night Service Announcement',
+          label: 'Announcement',
+          nodeSubtitle: 'Night Service',
           messageType: ns.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-          audioFile: ns.audioFiles?.[0]?.fileName ?? '',
+          ...audioFields(ns.audioFiles, announcementNames),
+          cqAnnouncementSource: true,
         } as NodeData,
       });
       edges.push(mkEdge(`e-${gateId}-ns-ann`, gateId, nsAnnId, {
@@ -456,7 +567,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
   }
 
   // ── Holiday Service action (right of queue) ───────────────────────────────
-  const holService = holidayService?.holidayServiceEnabled ? holidayService : undefined;
+  const holService = hasHolidayAction ? holidayService : undefined;
   if (holService && gateId) {
     let holKind: NodeData['kind'];
     let holData: Partial<NodeData>;
@@ -473,7 +584,12 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
     }
 
     let holSourceId     = gateId;
-    const holHandle = hasNightService && nsHasHoliday ? 'output-2' : 'output-1';
+    // This branch only runs when hasHolidayAction is true, so the Night-Service gate
+    // above was built with hasHolidayBranch: true and therefore always renders a 3rd
+    // handle (output-2) — regardless of whether Night Service also has its own,
+    // unrelated holidayScheduleId. The Holiday-only gate never has this ambiguity:
+    // it always has exactly 2 handles, so output-1 is its real Holiday handle.
+    const holHandle = hasNightService ? 'output-2' : 'output-1';
     let holSourceHandle: string | undefined = holHandle;
     let holSourceLabel:  string | undefined = 'Holiday';
     let holSourceColor:  string | undefined = '#8b5cf6';
@@ -486,9 +602,11 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         position: { x: CENTER_X + COL_GAP, y: queueRowY - ROW_GAP / 2 },
         data: {
           kind: 'playMessage',
-          label: 'Holiday Announcement',
+          label: 'Announcement',
+          nodeSubtitle: 'Holiday',
           messageType: holService.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-          audioFile: holService.audioFiles?.[0]?.fileName ?? '',
+          ...audioFields(holService.audioFiles, announcementNames),
+          cqAnnouncementSource: true,
         } as NodeData,
       });
       edges.push(mkEdge(`e-${gateId}-hol-ann`, gateId, holAnnId, {
@@ -540,6 +658,10 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         kind: 'playMessage',
         label: 'Comfort Message',
         messageType: qs?.comfortMessage?.greeting === 'CUSTOM' ? 'audio' : 'tts',
+        // Same missing-field fix as the Welcome/Intro node above — Comfort Message
+        // also uses audioAnnouncementFiles, not audioFiles, and was never read.
+        ...audioFields(qs?.comfortMessage?.audioAnnouncementFiles, announcementNames),
+        cqAnnouncementSource: true,
       } as NodeData,
     });
     edges.push(mkEdge(`e-${queueNodeId}-comfort`, queueNodeId, comfortId, {
@@ -567,8 +689,14 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         position: { x: CENTER_X - COL_GAP, y: actionRowY - ROW_GAP / 2 },
         data: {
           kind: 'playMessage',
-          label: 'Overflow Announcement',
+          label: 'Announcement',
+          nodeSubtitle: 'Overflow',
           messageType: overflow.greeting === 'CUSTOM' ? 'audio' : 'tts',
+          // Confirmed via live capture — Overflow uses audioAnnouncementFiles (same
+          // as Welcome/Comfort), not audioFiles (Night/Holiday/Stranded/Forced
+          // Forward) — this was never read at all before, same gap as those two.
+          ...audioFields(overflow.audioAnnouncementFiles, announcementNames),
+          cqAnnouncementSource: true,
         } as NodeData,
       });
       edges.push(mkEdge(`e-${queueNodeId}-overflow-ann`, queueNodeId, ovAnnId, {
@@ -577,7 +705,13 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       ovSourceId = ovAnnId; ovSourceHandle = 'output-0'; ovSourceLabel = undefined; ovSourceColor = undefined;
     }
 
-    if (overflow?.action === 'TRANSFER_TO_PHONE_NUMBER' && overflow.transferToPhoneNumber) {
+    // Confirmed via live capture: action really is 'TRANSFER_TO_PHONE_NUMBER', and
+    // the destination field is transferNumber — not transferToPhoneNumber (an
+    // earlier session's own guess) or transferPhoneNumber (the naming pattern used
+    // by every sibling policy). Neither guess was right; this was the actual bug —
+    // the action check was always correct, but transferToPhoneNumber was always
+    // undefined, so the condition never passed regardless of the real config.
+    if (overflow?.action === 'TRANSFER_TO_PHONE_NUMBER' && overflow.transferNumber) {
       const ovTransferId = uid('cq-overflow-transfer');
       nodes.push({
         id: ovTransferId,
@@ -587,7 +721,7 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
           kind: 'transfer',
           label: 'Overflow',
           transferType: 'blind',
-          transferNumber: overflow.transferToPhoneNumber,
+          transferNumber: overflow.transferNumber,
         } as NodeData,
       });
       edges.push(mkEdge(`e-${ovSourceId}-overflow`, ovSourceId, ovTransferId, {
@@ -723,23 +857,25 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
 
     if (strAction === 'TRANSFER') {
       strKind = 'transfer';
-      strData = { label: 'No Agents: Transfer', transferType: 'blind', transferNumber: strandedCalls?.transferPhoneNumber ?? '' };
+      strData = { label: 'Forwards the call (Stranded Calls)', transferType: 'blind', transferNumber: strandedCalls?.transferPhoneNumber ?? '' };
     } else if (strAction === 'BUSY') {
       strKind = 'end';
-      strData = { label: 'No Agents: Busy Treatment' };
+      strData = { label: 'Plays a busy tone, caller disconnects' };
     } else if (strAction === 'RINGING') {
       strKind = 'end';
-      strData = { label: 'No Agents: Ring Until Hangup' };
+      strData = { label: 'Keeps ringing until the caller hangs up' };
     } else if (strAction === 'NIGHT_SERVICE') {
       strKind = 'end';
-      strData = { label: 'No Agents: Follow Night Service' };
+      strData = { label: 'Follows the Night Service setting' };
     } else {
       // ANNOUNCEMENT
       strKind = 'playMessage';
       strData = {
-        label: 'No Agents: Announcement',
+        label: 'Announcement',
+        nodeSubtitle: 'Stranded Calls',
         messageType: strandedCalls?.audioMessageSelection === 'CUSTOM' ? 'audio' : 'tts',
-        audioFile: strandedCalls?.audioFiles?.[0]?.fileName ?? '',
+        ...audioFields(strandedCalls?.audioFiles, announcementNames),
+        cqAnnouncementSource: true,
       };
     }
 
@@ -750,8 +886,10 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
       position: { x: CENTER_X + COL_GAP, y: actionRowY },
       data: { kind: strKind, ...strData } as NodeData,
     });
+    // Plain description leads on the edge label too, with the Webex policy name
+    // kept in parentheses so it's still searchable against Webex's own docs.
     edges.push(mkEdge(`e-${queueNodeId}-stranded`, queueNodeId, strandedId, {
-      handle: 'output-2', label: 'No Agents', color: '#ef4444',
+      handle: 'output-2', label: 'No Agents Available (Stranded Calls)', color: '#ef4444',
     }));
   }
 
@@ -845,11 +983,13 @@ export function importCallQueue(input: CQImportInput): { nodes: Node<NodeData>[]
         kind: 'subAutoAttendant',
         label: 'Digital Handoff',
         // Webex's API only exposes a raw destination id here — no type discriminator,
-        // so we can't confirm it's actually an Auto-Attendant. Show the id as-is instead
-        // of fabricating a resolved name; PropertiesPanel flags it as unverified.
+        // so we can't confirm it's actually an Auto-Attendant. Keep the raw id in
+        // targetAutoAttendantId (PropertiesPanel uses it to detect/flag the mismatch),
+        // but never surface it as-is in the displayed name — a bare GUID on canvas
+        // reads as "the tool is broken" to a non-technical viewer.
         targetAutoAttendantId:   qs?.digitalChannelHandoffDestinationId ?? '',
         targetAutoAttendantName: qs?.digitalChannelHandoffDestinationId
-          ? `Unresolved destination (${qs.digitalChannelHandoffDestinationId})`
+          ? 'Digital Handoff — destination not resolved (connect org to verify)'
           : '',
       } as NodeData,
     });

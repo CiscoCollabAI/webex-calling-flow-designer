@@ -71,6 +71,28 @@ body {
   transition: opacity 0.1s, transform 0.1s;
 }
 
+/* View transitions — Homepage/Dashboard/Canvas switches and the boot screen fade
+   in with a restrained fade+slide, not a flashy effect. Disabled entirely for
+   users who've asked for reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .view-fade-in {
+    animation: view-fade-in 0.22s ease-out;
+  }
+  .fade-in {
+    animation: fade-in 0.18s ease-out;
+  }
+}
+
+@keyframes view-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

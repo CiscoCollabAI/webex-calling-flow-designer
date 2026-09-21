@@ -79,6 +79,20 @@ export interface WebexAnnouncement {
   locationName?: string;
 }
 
+// Queue-scoped announcement file listing — documented response fields are id,
+// fileName, fileSize, mediaFileType, level. name is NOT confirmed present here
+// (unlike the org-wide WebexAnnouncement, which has both name and fileName) —
+// kept optional so the app uses it if the org actually returns one, without
+// assuming it does.
+export interface WebexQueueAnnouncementFile {
+  id?: string;
+  name?: string;
+  fileName?: string;
+  fileSize?: string;
+  mediaFileType?: string;
+  level?: string;
+}
+
 export interface WebexAutoAttendant {
   id: string;
   name: string;
@@ -168,7 +182,20 @@ export interface WebexScheduleEvent {
   recurrence?: {
     recurForEver?: boolean;
     recurWeekly?: {
-      scheduleDay?: string; // "MONDAY" | "TUESDAY" | ...
+      // Not confirmed against a live response (no capture comment existed for this
+      // shape, unlike most other fields in this file). Webex Calling's schedule
+      // recurrence is documented elsewhere as one event able to span multiple days
+      // via per-day booleans (e.g. one "Mon-Fri" event, not five single-day events)
+      // — modeled here as the primary shape, with scheduleDay kept as a fallback in
+      // case a single-day-per-event shape is what a real response actually returns.
+      monday?: boolean;
+      tuesday?: boolean;
+      wednesday?: boolean;
+      thursday?: boolean;
+      friday?: boolean;
+      saturday?: boolean;
+      sunday?: boolean;
+      scheduleDay?: string; // "MONDAY" | "TUESDAY" | ... — fallback shape
     };
     recurAnnuallyByDay?: {
       day?: number;
@@ -284,25 +311,30 @@ export interface WebexQueueCallPolicies {
   };
 }
 
-// Confirmed against a full live queue-detail response. Only 'PERFORM_BUSY_TREATMENT'
-// is directly confirmed for `action` — 'TRANSFER_TO_PHONE_NUMBER' and
-// 'PLAY_ANNOUNCEMENT_THEN_DISCONNECT' are prior guesses, kept but not asserted as
-// fact (hence the loose | string). transferToPhoneNumber is likewise unconfirmed —
-// the naming convention confirmed everywhere else (Night/Holiday Service, Stranded
-// Calls, Forced Forward) is transferPhoneNumber (no "To"), so this field name is
-// suspect; don't rename without a live transfer-configured example.
+// Confirmed against a full live queue-detail response (a real Transfer to Phone
+// Number configuration) — both 'PERFORM_BUSY_TREATMENT' and 'TRANSFER_TO_PHONE_
+// NUMBER' are now directly confirmed for `action`. The destination field is
+// transferNumber — neither of the two prior guesses (transferToPhoneNumber,
+// transferPhoneNumber) was correct; this was the actual root cause of Overflow's
+// Transfer setting never rendering, since the action check was already right but
+// the field it gated on was always undefined. 'PLAY_ANNOUNCEMENT_THEN_DISCONNECT'
+// remains an unconfirmed guess (no live example seen yet).
 export interface WebexQueueOverflow {
   action?: 'PERFORM_BUSY_TREATMENT' | 'TRANSFER_TO_PHONE_NUMBER' | 'PLAY_ANNOUNCEMENT_THEN_DISCONNECT' | string;
   sendToVoicemail?: boolean;
-  transferToPhoneNumber?: string;
+  transferNumber?: string;
   // Confirmed field names — the prior waitTimeEnabled/waitTimeValue never appeared
   // in any real response.
   overflowAfterWaitEnabled?: boolean;
   overflowAfterWaitTime?: number;
   playOverflowGreetingEnabled?: boolean;
   greeting?: 'DEFAULT' | 'CUSTOM' | string;
+  // Confirmed via live capture — same audioAnnouncementFiles shape as Welcome/
+  // Comfort messages, not the audioFiles shape used by Night/Holiday/Stranded/
+  // Forced Forward. Previously never read into any node.
+  audioAnnouncementFiles?: WebexAudioAnnouncementFile[];
   // Deprecated per Webex's changelog (removal scheduled ~March 2027) and redundant
-  // with checking transferToPhoneNumber directly — modeled for completeness, not
+  // with checking transferNumber directly — modeled for completeness, not
   // used in any logic.
   isTransferNumberSet?: boolean;
 }

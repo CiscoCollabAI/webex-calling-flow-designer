@@ -8,7 +8,7 @@ export function useOrgData() {
     orgName, userName, userEmail, userAvatar,
     lastSyncedAt, hasWriteScope,
     locations, queues, users, schedules,
-    phoneNumbers, autoAttendants, huntGroups,
+    phoneNumbers, autoAttendants, huntGroups, announcements,
     cxQueues, cxScanStatus, cxScanned,
     connect, disconnect, refresh, scanCxQueues,
   } = useOrgStore();
@@ -33,6 +33,7 @@ export function useOrgData() {
     phoneNumbers,
     autoAttendants,
     huntGroups,
+    announcements,
 
     // Derived helpers used by OrgSelect dropdowns
     queueOptions: queues.map((q) => ({
@@ -85,6 +86,12 @@ export function useOrgData() {
       value: a.id,
       label: a.name,
       meta: a.locationName,
+    })),
+
+    announcementOptions: announcements.map((a) => ({
+      value: a.name,
+      label: a.name,
+      meta: a.mediaFileType ?? 'audio',
     })),
 
     // CX Essentials scan

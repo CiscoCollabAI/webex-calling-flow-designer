@@ -1,0 +1,154 @@
+{
+  "id": "WJkMS............",
+  "name": "Call-Queue-Support",
+  "enabled": true,
+  "language": "English",
+  "languageCode": "en_us",
+  "lastName": "Call-Queue-Support",
+  "timeZone": "Europe/Berlin",
+  "extension": "99999",
+  "esn": "99999",
+  "phoneNumberForOutgoingCallsEnabled": true,
+  "callingLineIdPolicy": "LOCATION_NUMBER",
+  "callingLineIdPhoneNumber": ".....4003",
+  "alternateNumberSettings": {
+    "distinctiveRingEnabled": true,
+    "alternateNumbers": []
+  },
+  "callPolicies": {
+    "policy": "CIRCULAR",
+    "callBounce": {
+      "callBounceEnabled": true,
+      "callBounceMaxRings": 8,
+      "agentUnavailableEnabled": false,
+      "alertAgentEnabled": false,
+      "alertAgentMaxSeconds": 30,
+      "callBounceOnHoldEnabled": false,
+      "callBounceOnHoldMaxSeconds": 60
+    },
+    "distinctiveRing": {
+      "enabled": true,
+      "ringPattern": "LONG_LONG"
+    },
+    "routingType": "SKILL_BASED"
+  },
+  "queueSettings": {
+    "queueSize": 10,
+    "callOfferToneEnabled": true,
+    "resetCallStatisticsEnabled": true,
+    "useEnterprisePlayToneToAgentSettingsEnabled": true,
+    "overflow": {
+      "action": "TRANSFER_TO_PHONE_NUMBER",
+      "sendToVoicemail": false,
+      "transferNumber": "1007",
+      "overflowAfterWaitEnabled": true,
+      "overflowAfterWaitTime": 30,
+      "playOverflowGreetingEnabled": true,
+      "greeting": "CUSTOM",
+      "audioAnnouncementFiles": [
+        {
+          "id": "Y2lzY29zcGFyazovL3VzL0FOTk9VTkNFTUV........",
+          "fileName": "1752096982842.wav",
+          "mediaFileType": "WAV",
+          "level": "LOCATION",
+          "isTextToSpeech": false
+        }
+      ],
+      "isTransferNumberSet": true
+    },
+    "waitMessage": {
+      "enabled": false,
+      "waitMode": "POSITION",
+      "handlingTime": 100,
+      "queuePosition": 100,
+      "highVolumeMessageEnabled": false,
+      "callbackOptionEnabled": false,
+      "minimumEstimatedCallbackTime": 30,
+      "internationalCallbackEnabled": false,
+      "playUpdatedEstimatedWaitMessage": false,
+      "defaultHandlingTime": 5
+    },
+    "welcomeMessage": {
+      "enabled": true,
+      "alwaysEnabled": true,
+      "greeting": "CUSTOM",
+      "audioAnnouncementFiles": [
+        {
+          "id": "Y2lzY29zcGFyazovL3VzL0FOTk9VTkNFT...........",
+          "fileName": "1752096982842.wav",
+          "mediaFileType": "WAV",
+          "level": "LOCATION",
+          "isTextToSpeech": false
+        }
+      ]
+    },
+    "comfortMessage": {
+      "enabled": true,
+      "timeBetweenMessages": 10,
+      "greeting": "DEFAULT"
+    },
+    "mohMessage": {
+      "normalSource": {
+        "enabled": true,
+        "greeting": "DEFAULT"
+      },
+      "alternateSource": {
+        "enabled": false,
+        "greeting": "DEFAULT"
+      }
+    },
+    "comfortMessageBypass": {
+      "enabled": false,
+      "callWaitingAgeThreshold": 30,
+      "greeting": "DEFAULT",
+      "playAnnouncementAfterRinging": true,
+      "ringTimeBeforePlayingAnnouncement": 10
+    },
+    "whisperMessage": {
+      "enabled": true,
+      "greeting": "DEFAULT"
+    },
+    "playToneToAgentForBargeInEnabled": true,
+    "playToneToAgentForSilentMonitoringEnabled": true,
+    "playToneToAgentForSupervisorCoachingEnabled": true
+  },
+  "allowCallWaitingForAgentsEnabled": false,
+  "agents": [
+    {
+      "id": "Y2lzY29zcGFyazovL3VzL1B.......E",
+      "type": "PEOPLE",
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "phoneNumber": ".....4010",
+      "extension": "1010",
+      "esn": "1010",
+      "skillLevel": 1,
+      "joinEnabled": true,
+      "location": {
+        "name": "Neu-Isenburg",
+        "id": "Y2lzY29zcGFyazovL3VzL0xPQ0FUSU9OL2RjMTd......."
+      },
+      "hasCxEssentials": false
+    },
+    {
+      "id": "Y2lzY29zcGFyazovL3VzL1BFT1BMRS9iOTkwNWI1NS.........",
+      "type": "PEOPLE",
+      "firstName": "John",
+      "lastName": "Smith",
+      "extension": "1006",
+      "esn": "1006",
+      "skillLevel": 1,
+      "joinEnabled": true,
+      "location": {
+        "name": "Neu-Isenburg",
+        "id": "Y2lzY29zcGFyazovL3VzL........"
+      },
+      "hasCxEssentials": false
+    }
+  ],
+  "allowAgentJoinEnabled": true,
+  "dialByName": "Call-Queue-Support",
+  "directLineCallerIdName": {
+    "selection": "DISPLAY_NAME"
+  }
+}
